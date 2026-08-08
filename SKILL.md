@@ -1,5 +1,5 @@
 ---
-name: office-token-boost
+name: office-token-booster
 description: 办公室提效助手 —— 帮你把会议纪要、Excel 数据、周报、文档整理等重复办公任务一键自动化，并量化每次任务节省的 Token 与耗时。适用于办公生产力、数据分析、效率提升场景。
 version: 0.1.0
 author: Elisabeth15501
@@ -33,7 +33,7 @@ metadata:
     platform: ["tianxi", "openclaw", "linux", "macos", "windows"]
 ---
 
-# 办公室提效助手（office-token-boost）
+# 办公室提效助手（office-token-booster）
 
 > 把重复办公任务交给技能，把省下的 Token 和時間看得見。
 
@@ -41,7 +41,7 @@ metadata:
 
 办公室里大量时间花在**重复、低创意**的事情上：把一小时会议录音整理成纪要、从一张杂乱的 Excel 里算出关键指标、每周五手写周报、把长文档压成要点。
 
-`office-token-boost` 把这些任务做成可复用的流程，**产出结构化结果的同时，量化你每次省了多少 Token、多少分钟**——让你和团队对"AI 到底帮我省了什么"有清晰的体感，而不是一句模糊的"提效了"。
+`office-token-booster` 把这些任务做成可复用的流程，**产出结构化结果的同时，量化你每次省了多少 Token、多少分钟**——让你和团队对"AI 到底帮我省了什么"有清晰的体感，而不是一句模糊的"提效了"。
 
 ## 核心卖点：Token 提效可视化
 

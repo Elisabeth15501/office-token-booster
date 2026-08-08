@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-office-token-boost :: 提效账本报告引擎
+office-token-booster :: 提效账本报告引擎
 =====================================
 读取用户提供的任务账本 JSON，量化"笨办法 vs 本技能"节省的 Token 与耗时，
 生成 Markdown + HTML 报告。
