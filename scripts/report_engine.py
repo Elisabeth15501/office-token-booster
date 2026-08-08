@@ -38,30 +38,16 @@ Token 与耗时，生成 Markdown / HTML / JSON 报告。
 import argparse
 import json
 import math
-import re
 import sys
 import unicodedata
-from collections import defaultdict
-from datetime import datetime
-from pathlib import Path
+from diagnose import format_number, load_ledger, diagnose, Diagnosis
 
 
 # ─────────────────────────────────────────────────────────────
 # 通用工具（沿用 A 引擎渲染原语）
 # ─────────────────────────────────────────────────────────────
 
-def format_number(n):
-    """数字格式化：K/M/G 后缀"""
-    if n is None:
-        return "0"
-    n = float(n)
-    if n >= 1_000_000_000:
-        return f"{n / 1e9:.2f}G"
-    elif n >= 1_000_000:
-        return f"{n / 1e6:.2f}M"
-    elif n >= 1_000:
-        return f"{n / 1e3:.1f}K"
-    return str(int(n)) if n == int(n) else f"{n:.1f}"
+# format_number 已移至 diagnose.py（内核与渲染共用），此处从 diagnose 导入。
 
 
 def _disp_width(s):
@@ -72,6 +58,11 @@ def _disp_width(s):
 def _pad_label(s, width):
     """按显示宽度右侧补空格，使等宽字体下中文 / 英文混排的标签列对齐。"""
     return str(s) + " " * max(0, width - _disp_width(s))
+
+
+def _safe_div(a, b):
+    """防零除：b 为 0 时返回 0。"""
+    return (a / b) if b else 0.0
 
 
 # 环形图调色板（与表格配色协调）
@@ -159,135 +150,18 @@ def build_saving_chart_md(by_type, value_key="saved_tokens", title="各任务类
 # 办公数据层（消费 ledger.json）
 # ─────────────────────────────────────────────────────────────
 
-def load_ledger(path):
-    """读取用户提供的账本 JSON，返回 tasks 列表。"""
-    if not Path(path).is_file():
-        raise FileNotFoundError(f"账本文件不存在: {path}")
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    tasks = data.get("tasks", [])
-    if not isinstance(tasks, list):
-        raise ValueError("ledger.json 顶层必须有 tasks 数组")
-    return tasks
-
-
-def _safe_div(a, b):
-    return (a / b) if b else 0.0
-
-
-def compute_summary(tasks):
-    """把 tasks 汇总为报告所需的摘要结构。"""
-    total_base_tok = sum(t.get("baseline_tokens", 0) or 0 for t in tasks)
-    total_skill_tok = sum(t.get("skill_tokens", 0) or 0 for t in tasks)
-    total_base_min = sum(t.get("baseline_minutes", 0) or 0 for t in tasks)
-    total_skill_min = sum(t.get("skill_minutes", 0) or 0 for t in tasks)
-    n = len(tasks)
-
-    saved_tok = total_base_tok - total_skill_tok
-    saved_min = total_base_min - total_skill_min
-
-    # 按任务类型聚合
-    by_type_map = {}
-    for t in tasks:
-        ty = t.get("type", "其他")
-        d = by_type_map.setdefault(ty, {"task_type": ty, "baseline_tokens": 0, "skill_tokens": 0,
-                                       "baseline_minutes": 0, "skill_minutes": 0, "count": 0})
-        d["baseline_tokens"] += t.get("baseline_tokens", 0) or 0
-        d["skill_tokens"] += t.get("skill_tokens", 0) or 0
-        d["baseline_minutes"] += t.get("baseline_minutes", 0) or 0
-        d["skill_minutes"] += t.get("skill_minutes", 0) or 0
-        d["count"] += 1
-
-    by_type = []
-    for ty, d in by_type_map.items():
-        d["saved_tokens"] = d["baseline_tokens"] - d["skill_tokens"]
-        d["saved_minutes"] = d["baseline_minutes"] - d["skill_minutes"]
-        d["token_save_pct"] = _safe_div(d["saved_tokens"], d["baseline_tokens"]) * 100
-        d["time_save_pct"] = _safe_div(d["saved_minutes"], d["baseline_minutes"]) * 100
-        by_type.append(d)
-    by_type.sort(key=lambda x: x["saved_tokens"], reverse=True)
-
-    # 按周聚合（取 date 的 ISO 周）
-    by_week_map = {}
-    for t in tasks:
-        date = t.get("date", "")
-        try:
-            dt = datetime.strptime(date, "%Y-%m-%d")
-            wk = dt.strftime("%Y-W%V")
-        except (ValueError, TypeError):
-            wk = "未知周"
-        w = by_week_map.setdefault(wk, {"week": wk, "baseline_tokens": 0, "skill_tokens": 0,
-                                        "baseline_minutes": 0, "skill_minutes": 0, "count": 0})
-        w["baseline_tokens"] += t.get("baseline_tokens", 0) or 0
-        w["skill_tokens"] += t.get("skill_tokens", 0) or 0
-        w["baseline_minutes"] += t.get("baseline_minutes", 0) or 0
-        w["skill_minutes"] += t.get("skill_minutes", 0) or 0
-        w["count"] += 1
-
-    by_week = []
-    for wk, w in by_week_map.items():
-        w["saved_tokens"] = w["baseline_tokens"] - w["skill_tokens"]
-        w["saved_minutes"] = w["baseline_minutes"] - w["skill_minutes"]
-        w["token_save_pct"] = _safe_div(w["saved_tokens"], w["baseline_tokens"]) * 100
-        by_week.append(w)
-    by_week.sort(key=lambda x: x["week"])
-
-    return {
-        "n": n,
-        "total_base_tok": total_base_tok,
-        "total_skill_tok": total_skill_tok,
-        "total_base_min": total_base_min,
-        "total_skill_min": total_skill_min,
-        "saved_tok": saved_tok,
-        "saved_min": saved_min,
-        "token_save_pct": _safe_div(saved_tok, total_base_tok) * 100,
-        "time_save_pct": _safe_div(saved_min, total_base_min) * 100,
-        "by_type": by_type,
-        "by_week": by_week,
-        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-    }
+# ─────────────────────────────────────────────────────────────
+# 办公数据层（消费 ledger.json）已移至 diagnose.py（诊断内核）：
+#   load_ledger / _safe_div / compute_summary / build_insights
+# 本文件只保留渲染层，渲染函数统一消费 diagnose.Diagnosis 对象。
+# ─────────────────────────────────────────────────────────────
 
 
 # ─────────────────────────────────────────────────────────────
 # 核心洞察（办公域）
 # ─────────────────────────────────────────────────────────────
 
-def build_insights(s):
-    """根据汇总产出办公域洞察与建议。返回 (insights, recommendations) 两个列表。"""
-    insights = []
-    recs = []
-
-    if s["n"] == 0:
-        return ["账本为空，暂无提效数据。"], ["先记录 1~2 周的任务账本，再生成报告。"]
-
-    insights.append(
-        f"本期共 {s['n']} 条任务，合计节省 **{format_number(s['saved_tok'])} Token**"
-        f"（省 {s['token_save_pct']:.1f}%），节省 **{format_number(s['saved_min'])} 分钟**"
-        f"（省 {s['time_save_pct']:.1f}%）。"
-    )
-
-    if s["by_type"]:
-        top = s["by_type"][0]
-        insights.append(
-            f"「{top['task_type']}」是提效主力：{top['count']} 次任务节省 "
-            f"{format_number(top['saved_tokens'])} Token（省 {top['token_save_pct']:.1f}%）。"
-        )
-        # 找基线最高的类型（最值得自动化的场景）
-        hottest = max(s["by_type"], key=lambda x: x["baseline_tokens"])
-        recs.append(
-            f"优先把「{hottest['task_type']}」类重复任务交给技能：其单次基线约 "
-            f"{format_number(hottest['baseline_tokens'] / max(hottest['count'], 1))} Token，"
-            f"自动化空间最大。"
-        )
-
-    if s["token_save_pct"] >= 50:
-        insights.append("整体提效显著（Token 节省 ≥ 50%），技能化已明显见效。")
-    elif s["token_save_pct"] < 20 and s["n"] >= 3:
-        insights.append("Token 节省偏低，可能部分任务本身已较精简，或基线估计偏高。")
-        recs.append("回顾基线估计是否合理：基线应是「自己手搓 / 反复试错」的真实成本。")
-
-    recs.append("保持「本地处理、不上传内容」的合规优势，作为对外可演示的差异化卖点。")
-    return insights, recs
+# build_insights 已移至 diagnose.py（诊断内核），其产出由 Diagnosis.insights / recommendations 携带。
 
 
 # ─────────────────────────────────────────────────────────────
@@ -352,7 +226,7 @@ def generate_markdown_report(s):
     L.append("| 日期 | 类型 | 基准(min) | 技能(min) | 省(min) | 基准(tok) | 技能(tok) | 省(tok) |")
     L.append("|------|------|------|------|------|------|------|------|")
     # 这里需要原始 tasks；compute_summary 不保留，改为在 main 注入
-    for t in s.get("_tasks", []):
+    for t in s.get("tasks", []):
         bt = t.get("baseline_tokens", 0) or 0
         st = t.get("skill_tokens", 0) or 0
         bm = t.get("baseline_minutes", 0) or 0
@@ -363,13 +237,13 @@ def generate_markdown_report(s):
     # 七、产出物清单
     L.append("## 七、产出物清单")
     L.append("")
-    for i, t in enumerate(s.get("_tasks", []), 1):
+    for i, t in enumerate(s.get("tasks", []), 1):
         note = t.get("note") or "（无备注）"
         L.append(f"{i}. `{t.get('date','')}` ｜ {t.get('type','')} ｜ {note}")
     L.append("")
 
     # 八、核心洞察与建议
-    insights, recs = build_insights(s)
+    insights, recs = s.insights, s.recommendations
     L.append("## 八、核心洞察与建议")
     L.append("")
     L.append("**洞察**")
@@ -409,7 +283,7 @@ def _bar_html(value, max_value, color="#2ecc71"):
 def generate_html_report(s):
     donut = build_donut_chart(s["by_type"], title="各任务类型 节省 Token 占比",
                               center_label="节省 Token", value_key="saved_tokens")
-    insights, recs = build_insights(s)
+    insights, recs = s.insights, s.recommendations
 
     type_rows = ""
     max_tok = max((d["baseline_tokens"] for d in s["by_type"]), default=1) or 1
@@ -431,7 +305,7 @@ def generate_html_report(s):
     rec_html = "".join(f"<li>{x}</li>" for x in recs)
 
     task_rows = ""
-    for t in s.get("_tasks", []):
+    for t in s.get("tasks", []):
         bt = t.get("baseline_tokens", 0) or 0
         st = t.get("skill_tokens", 0) or 0
         bm = t.get("baseline_minutes", 0) or 0
@@ -500,8 +374,8 @@ def generate_html_report(s):
 # ─────────────────────────────────────────────────────────────
 
 def generate_json_report(s):
-    out = dict(s)
-    out.pop("_tasks", None)
+    out = s.to_dict()
+    out.pop("tasks", None)
     return json.dumps(out, ensure_ascii=False, indent=2)
 
 
@@ -538,15 +412,14 @@ def main():
         print("[提示] 账本为空，无可统计任务。", file=sys.stderr)
         return 1
 
-    s = compute_summary(tasks)
-    s["_tasks"] = tasks  # 供明细段落使用（JSON 输出会剔除）
+    diag = diagnose(tasks)
 
     if args.format == "markdown":
-        report = generate_markdown_report(s)
+        report = generate_markdown_report(diag)
     elif args.format == "html":
-        report = generate_html_report(s)
+        report = generate_html_report(diag)
     else:
-        report = generate_json_report(s)
+        report = generate_json_report(diag)
 
     if args.output:
         Path(args.output).write_text(report, encoding="utf-8")

@@ -24,20 +24,25 @@
 
 1. 把任务记录写成 `ledger.json`（格式见 `SKILL.md`）。
 2. 触发技能："生成提效报告"。
-3. 技能调用 `scripts/report_engine.py` 产出 `reports/saving-report.md` 与 `.html`。
+3. 技能先做**一页摘要 + 图表**，再支持基于诊断结果的**追问**（如"哪个类型节省最多""按周趋势""有什么建议"）。
 
 ## 目录结构
 
 ```
 office-token-booster/
-├── SKILL.md              # OpenClaw 格式技能定义
+├── SKILL.md              # OpenClaw 格式技能定义 + 对话式诊断流程
 ├── config.yaml           # 替代原 config.json
 ├── scripts/
-│   └── report_engine.py  # 提效账本报告引擎（本地、离线，消费 ledger.json）
+│   ├── diagnose.py       # 诊断内核（纯函数）：ledger -> Diagnosis，无渲染/无副作用
+│   ├── report_engine.py  # 渲染层：消费 Diagnosis 产出 MD/HTML/JSON 九段报告
+│   └── qa.py             # 对话式追问外壳：answer_followup(diagnosis, question)，锚定 Diagnosis
 ├── references/           # 扩展文档
 ├── README.md
 └── LICENSE
 ```
+
+> 三层解耦：`diagnose.py`(内核) 是「对话式诊断」与「长链路 Agent」两个外壳的共享内核，
+> 后加 Agent 时只需在内核上叠加「建议生成 + 写回」管道，对话层代码不受影响（见 `产品发展计划时间线_双产品线.md`）。
 
 ## 合规
 
@@ -47,7 +52,7 @@ office-token-booster/
 
 ## 演进路线
 
-- v0.1.0（本版）：技能骨架 + 提效账本报告引擎 + 办公任务定位
-- v0.2：对话式诊断（先出摘要 + 图表，再支持追问）
+- v0.1.0：技能骨架 + 提效账本报告引擎 + 办公任务定位
+- v0.2（进行中）：对话式诊断骨架 —— 已落地 `diagnose.py` 内核 + `report_engine.py` 渲染 + `qa.py` 追问三层；下一步丰富追问语料与一页摘要模板
 - v0.3：长链路 Agent（采集任务 → 分析 → 给出省钱/提效建议 → 可选写回模板）
 - 目标：提交「天禧 AI Skills 苍穹共创计划」（截止 2026-12-31）
