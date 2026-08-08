@@ -93,7 +93,7 @@ metadata:
 }
 ```
 
-然后说"生成提效报告"，技能调用 `scripts/saving_report.py` 产出报告。
+然后说"生成提效报告"，技能调用 `scripts/report_engine.py` 产出报告。
 
 ## 设计与合规
 

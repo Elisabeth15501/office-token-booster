@@ -24,7 +24,7 @@
 
 1. 把任务记录写成 `ledger.json`（格式见 `SKILL.md`）。
 2. 触发技能："生成提效报告"。
-3. 技能调用 `scripts/saving_report.py` 产出 `reports/saving-report.md` 与 `.html`。
+3. 技能调用 `scripts/report_engine.py` 产出 `reports/saving-report.md` 与 `.html`。
 
 ## 目录结构
 
@@ -33,7 +33,7 @@ office-token-booster/
 ├── SKILL.md              # OpenClaw 格式技能定义
 ├── config.yaml           # 替代原 config.json
 ├── scripts/
-│   └── saving_report.py  # 提效账本报告引擎（本地、离线）
+│   └── report_engine.py  # 提效账本报告引擎（本地、离线，消费 ledger.json）
 ├── references/           # 扩展文档
 ├── README.md
 └── LICENSE
