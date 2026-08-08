@@ -1,0 +1,9 @@
+# 本地运行产物
+__pycache__/
+*.pyc
+reports/
+*.html
+ledger.json
+data*.json
+_meta.json
+*.zip

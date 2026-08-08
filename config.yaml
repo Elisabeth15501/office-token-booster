@@ -1,0 +1,31 @@
+# OpenClaw / 天禧 AI 格式配置（替代原 WorkBuddy 的 config.json）
+name: office-token-boost
+version: 0.1.0
+display_name: 办公室提效助手
+description: 办公室重复任务自动化 + Token/耗时提效可视化
+author: Elisabeth15501
+license: MIT
+entry: SKILL.md
+runtime:
+  python: ">=3.10"
+tools:
+  - filesystem
+  - shell
+permissions:
+  filesystem:
+    read: ["."]
+    write: ["reports/", "ledger.json"]
+network:
+  outbound: false   # 全部本地处理，不联网
+privacy:
+  collects_personal_data: false
+  uploads_data: false
+  note: 仅处理用户主动提供的文件，报告本地生成
+categories:
+  - 办公生产力
+  - 数据分析
+  - 效率工具
+tags:
+  - office
+  - productivity
+  - token-saving
