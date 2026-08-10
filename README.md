@@ -2,10 +2,10 @@
 
 > 把重复办公任务交给技能，把省下的 Token 和時間看得見。
 
-`office-token-booster` 是一个面向**办公生产力**场景的 AI 技能（OpenClaw / 天禧 AI 格式），
+`office-token-booster` 是一个面向**办公生产力**场景的 AI 技能（OpenClaw 格式），
 帮你把会议纪要、Excel 数据分析、周报、文档提炼等重复任务自动化，并**量化每次任务节省的 Token 与耗时**。
 
-本技能是 `agent-analytics-report`（WorkBuddy 用量分析报告）的**兄弟产品线**——
+本技能是 `agent-analytics-report`（WorkBuddy 用量分析报告）的**姐妹产品线**——
 两者复用同一套「报告渲染 + 异常检测」思路，但定位完全不同：
 
 | 产品线 | 平台 | 定位 |
