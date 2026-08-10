@@ -17,10 +17,20 @@
 """
 
 import json
+import statistics
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
+
+
+# 方法论说明（报告页脚反复出现，统一出口）。
+# 核心：节省值是用户自报基准估计的参照值，非平台用量实测扣费；不调用任何外部 API。
+METHODOLOGY_NOTE = (
+    "方法论说明：本报告的「节省值」= 你填写的基准估计（不使用本技能、自己手搓 / 反复试错的成本）"
+    "− 本技能实际消耗，均为你的主观参照估计，非平台用量实测扣费。本技能不调用任何外部 API "
+    "测量 Token，仅读取你主动提供的账本文件（本地处理、零上传，符合 ADR-9）。"
+)
 
 
 def format_number(n):
@@ -165,6 +175,64 @@ def build_insights(s):
     return insights, recs
 
 
+def detect_baseline_anomalies(tasks):
+    """轻量护栏：识别可能拉高「提效」可信度风险的账本填写问题。
+
+    返回中文提示列表（caveats）。目的不是纠错，而是让报告在评委 / 用户面前
+    主动暴露「节省值是自报参照」这一前提，避免虚高数字被当成实测扣费。
+    """
+    caveats = []
+
+    # 1) 零 / 负节省：技能 Token 与基准持平或更高 -> 该任务未体现提效
+    for t in tasks:
+        bt = t.get("baseline_tokens", 0) or 0
+        st = t.get("skill_tokens", 0) or 0
+        ty = t.get("type", "其他")
+        date = t.get("date", "")
+        if bt > 0 and st >= bt:
+            if st == 0:
+                caveats.append(
+                    f"任务「{ty} @ {date}」技能 Token 为 0，节省率记为 100%，"
+                    f"可能存在漏填或基线估计偏高，建议复核。"
+                )
+            else:
+                caveats.append(
+                    f"任务「{ty} @ {date}」技能 Token（{format_number(st)}）与基准"
+                    f"（{format_number(bt)}）持平或更高，该任务未体现提效，请确认填写。"
+                )
+
+    # 2) 基线离群：单条基准显著高于「整体中位数」3 倍 -> 估计可能偏高
+    #    （全局口径，可捕获「仅出现一次的高基线任务」，比同类口径更稳）
+    baselines = [t.get("baseline_tokens", 0) or 0 for t in tasks if (t.get("baseline_tokens", 0) or 0) > 0]
+    if len(baselines) >= 2:
+        med = statistics.median(baselines)
+        if med > 0:
+            for t in tasks:
+                bt = t.get("baseline_tokens", 0) or 0
+                ty = t.get("type", "其他")
+                date = t.get("date", "")
+                if bt > 3 * med:
+                    caveats.append(
+                        f"任务「{ty} @ {date}」基准 Token（{format_number(bt)}）显著高于整体中位数"
+                        f"（{format_number(med)}），估计可能偏高，拉高了整体节省率。"
+                    )
+                    break  # 只报一次，避免噪声
+
+    # 3) 整体极高节省率 -> 提示基准是否保守（不论样本量，只给温和提醒）
+    total_base = sum(t.get("baseline_tokens", 0) or 0 for t in tasks)
+    total_skill = sum(t.get("skill_tokens", 0) or 0 for t in tasks)
+    if total_base > 0:
+        overall_pct = (total_base - total_skill) / total_base * 100
+        if overall_pct > 85:
+            sample_note = "（样本较少时尤其需复核）" if len(tasks) <= 3 else ""
+            caveats.append(
+                f"整体 Token 节省率高达 {overall_pct:.1f}%{sample_note}，"
+                f"请确认「基准」是否为真实手搓成本，避免高估提效。"
+            )
+
+    return caveats
+
+
 @dataclass
 class Diagnosis:
     """诊断内核的结构化输出契约。渲染层（report_engine）与对话层（qa）共享此对象。
@@ -184,6 +252,8 @@ class Diagnosis:
     by_week: list = field(default_factory=list)
     insights: list = field(default_factory=list)
     recommendations: list = field(default_factory=list)
+    caveats: list = field(default_factory=list)
+    methodology: str = METHODOLOGY_NOTE
     tasks: list = field(default_factory=list)
     generated_at: str = ""
 
@@ -204,6 +274,7 @@ def diagnose(tasks):
     """
     s = compute_summary(tasks)
     insights, recs = build_insights(s)
+    caveats = detect_baseline_anomalies(tasks)
     return Diagnosis(
         n=s["n"],
         total_base_tok=s["total_base_tok"],
@@ -218,6 +289,7 @@ def diagnose(tasks):
         by_week=s["by_week"],
         insights=insights,
         recommendations=recs,
+        caveats=caveats,
         tasks=s["tasks"],
         generated_at=s["generated_at"],
     )

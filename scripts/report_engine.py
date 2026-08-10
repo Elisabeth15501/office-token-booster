@@ -264,8 +264,19 @@ def generate_markdown_report(s):
     L.append("- 对高频 / 高基线场景沉淀为可复用提示词模板，进一步压缩技能 Token。")
     L.append("- 若参加「天禧 AI Skills 苍穹共创计划」，本报告的「本地处理、零上传」可作为合规卖点。")
     L.append("")
+
+    # 数据可信度提示（baseline 护栏，v0.2 新增）
+    if s["caveats"]:
+        L.append("## 十、数据可信度提示")
+        L.append("")
+        L.append("> 节省值基于你填写的基准估计，以下提示用于校验「提效」声称的可信度：")
+        L.append("")
+        for c in s["caveats"]:
+            L.append(f"- ⚠️ {c}")
+        L.append("")
+
     L.append("---")
-    L.append("*节省值为基于你填写的基准估计计算的参考值，用于建立提效体感，非平台计费数据。*")
+    L.append(f"*{s['methodology']}*")
     return "\n".join(L)
 
 
@@ -303,6 +314,7 @@ def generate_html_report(s):
 
     insight_html = "".join(f"<li>{x}</li>" for x in insights)
     rec_html = "".join(f"<li>{x}</li>" for x in recs)
+    caveat_html = "".join(f"<li>{c}</li>" for c in s.get("caveats", []))
 
     task_rows = ""
     for t in s.get("tasks", []):
@@ -335,6 +347,14 @@ def generate_html_report(s):
     ul{margin:6px 0;}
     """
 
+    caveat_block = ""
+    if s.get("caveats"):
+        caveat_block = (
+            '<h2>五、数据可信度提示</h2>'
+            '<p style="color:var(--muted)">节省值基于你填写的基准估计，以下提示用于校验「提效」声称的可信度：</p>'
+            f'<ul>{caveat_html}</ul>'
+        )
+
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -363,7 +383,7 @@ def generate_html_report(s):
 <h2>四、核心洞察与建议</h2>
 <p><strong>洞察</strong></p><ul>{insight_html}</ul>
 <p><strong>建议</strong></p><ul>{rec_html}</ul>
-
+{caveat_block}
 <p class="note">节省值为基于你填写的基准估计计算的参考值，用于建立提效体感，非平台计费数据。本报告全部本地生成，不含任何外部传输。</p>
 </body></html>"""
     return html
@@ -380,6 +400,104 @@ def generate_json_report(s):
 
 
 # ─────────────────────────────────────────────────────────────
+# 一页摘要（对话式诊断首屏，v0.2 新增）
+# 区别于九段完整报告：只给核心数字 + 提效主力 + 一句话结论 + 数据可信度 + 方法论，
+# 作为「先出摘要 + 图表，再支持追问」流程的第一屏。
+# ─────────────────────────────────────────────────────────────
+
+def _credibility_block_md(s):
+    if s["caveats"]:
+        lines = ["## 数据可信度", "", "> 节省值基于你填写的基准估计，以下提示用于校验「提效」声称的可信度：", ""]
+        for c in s["caveats"]:
+            lines.append(f"- ⚠️ {c}")
+        lines.append("")
+        return "\n".join(lines)
+    return "\n".join([
+        "## 数据可信度", "",
+        "- 基线为你的估计参照，非计费实测；当前未发现明显异常。", "",
+    ])
+
+
+def generate_markdown_summary(s):
+    top = s["by_type"][0] if s["by_type"] else None
+    L = []
+    L.append("# 办公室提效 · 一页摘要")
+    L.append("")
+    L.append(f"> 生成时间：{s['generated_at']} ｜ 共 {s['n']} 条任务记录")
+    L.append("")
+    L.append("## 核心数字")
+    L.append("")
+    L.append(f"- **节省 Token**：{format_number(s['saved_tok'])}（基准 {format_number(s['total_base_tok'])} → 本技能 {format_number(s['total_skill_tok'])}），省 **{s['token_save_pct']:.1f}%**")
+    L.append(f"- **节省时间**：{format_number(s['saved_min'])} 分（基准 {format_number(s['total_base_min'])} → 本技能 {format_number(s['total_skill_min'])}），省 **{s['time_save_pct']:.1f}%**")
+    L.append("")
+    L.append("## 提效主力")
+    L.append("")
+    if top:
+        L.append(f"- 「{top['task_type']}」：{top['count']} 次共省 {format_number(top['saved_tokens'])} Token（省 {top['token_save_pct']:.1f}%）")
+    else:
+        L.append("- 暂无任务类型数据")
+    L.append("")
+    L.append("## 一句话结论")
+    L.append("")
+    L.append(f"- {s['insights'][0] if s['insights'] else '暂无数据。'}")
+    L.append("")
+    L.append(_credibility_block_md(s))
+    L.append("---")
+    L.append(f"*{s['methodology']}*")
+    L.append("")
+    L.append("> 💡 可继续追问（如「哪个类型省最多」「按周趋势」「有啥建议」），或说「生成完整报告」查看完整明细。")
+    return "\n".join(L)
+
+
+def generate_html_summary(s):
+    donut = build_donut_chart(s["by_type"], title="各任务类型 节省 Token 占比",
+                              center_label="节省 Token", value_key="saved_tokens")
+    top = s["by_type"][0] if s["by_type"] else None
+    top_html = (f"「{top['task_type']}」：{top['count']} 次共省 {format_number(top['saved_tokens'])} Token"
+                f"（省 {top['token_save_pct']:.1f}%）") if top else "暂无任务类型数据"
+    conclusion = s["insights"][0] if s["insights"] else "暂无数据。"
+    if s["caveats"]:
+        cred_html = ('<p style="color:var(--muted)">节省值基于你填写的基准估计，以下提示用于校验「提效」声称的可信度：</p>'
+                     '<ul>' + "".join(f"<li>⚠️ {c}</li>" for c in s["caveats"]) + "</ul>")
+    else:
+        cred_html = '<p style="color:var(--muted)">基线为你的估计参照，非计费实测；当前未发现明显异常。</p>'
+
+    css = """
+    :root{--bg:#fff;--fg:#111827;--muted:#6b7280;--table-border:#e5e7eb;
+          --accent:#22c55e;--accent-fg:#111827;}
+    body{font-family:-apple-system,Segoe UI,Roboto,'Microsoft YaHei',sans-serif;
+         max-width:720px;margin:24px auto;padding:0 16px;color:var(--fg);}
+    h1{font-size:22px;} h2{font-size:17px;margin-top:24px;border-left:4px solid var(--accent);padding-left:8px;}
+    .cards{display:flex;gap:16px;flex-wrap:wrap;margin:16px 0;}
+    .card{flex:1;min-width:160px;background:#f9fafb;border:1px solid var(--table-border);
+          border-radius:10px;padding:14px;}
+    .card .big{font-size:24px;font-weight:700;} .card .sub{color:var(--muted);font-size:13px;}
+    .chart-pie{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin:12px 0;}
+    .legend{font-size:13px;} .legend-item{margin:2px 0;}
+    .swatch{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;}
+    ul{margin:6px 0;} .note{color:var(--muted);font-size:12px;margin-top:18px;}
+    """
+    html = f"""<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>办公室提效 · 一页摘要</title>
+<style>{css}</style></head><body>
+<h1>办公室提效 · 一页摘要</h1>
+<p style="color:var(--muted)">生成时间：{s['generated_at']} ｜ 共 {s['n']} 条任务记录</p>
+<div class="cards">
+  <div class="card"><div class="big">{format_number(s['saved_tok'])}</div><div class="sub">节省 Token（基准 {format_number(s['total_base_tok'])} → 本技能 {format_number(s['total_skill_tok'])}，省 {s['token_save_pct']:.1f}%）</div></div>
+  <div class="card"><div class="big">{format_number(s['saved_min'])} 分</div><div class="sub">节省时间（基准 {format_number(s['total_base_min'])} → 本技能 {format_number(s['total_skill_min'])}，省 {s['time_save_pct']:.1f}%）</div></div>
+  <div class="card" style="display:flex;align-items:center;justify-content:center;">{donut}</div>
+</div>
+<h2>提效主力</h2><p>{top_html}</p>
+<h2>一句话结论</h2><p>{conclusion}</p>
+<h2>数据可信度</h2>{cred_html}
+<p class="note">{s['methodology']}</p>
+</body></html>"""
+    return html
+
+
+# ─────────────────────────────────────────────────────────────
 # CLI
 # ─────────────────────────────────────────────────────────────
 
@@ -390,6 +508,8 @@ def main():
     parser.add_argument("--output", "-o", type=str, help="输出文件路径")
     parser.add_argument("--format", type=str, default="markdown",
                         choices=["markdown", "html", "json"], help="输出格式")
+    parser.add_argument("--summary", action="store_true",
+                        help="输出一页摘要（对话式诊断首屏），而非完整报告")
     args = parser.parse_args()
 
     if not args.data_file:
@@ -414,7 +534,12 @@ def main():
 
     diag = diagnose(tasks)
 
-    if args.format == "markdown":
+    if args.summary:
+        if args.format == "html":
+            report = generate_html_summary(diag)
+        else:
+            report = generate_markdown_summary(diag)
+    elif args.format == "markdown":
         report = generate_markdown_report(diag)
     elif args.format == "html":
         report = generate_html_report(diag)

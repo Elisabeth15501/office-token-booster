@@ -11,3 +11,4 @@ _meta.json
 # 冗余 / 测试文件（沙箱 safe-delete 限制下保留于磁盘但退出跟踪）
 scripts/saving_report.py
 sample_ledger.json
+anomaly_ledger.json
