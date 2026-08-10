@@ -1,7 +1,7 @@
 ---
 name: office-token-booster
 description: 办公室提效助手 —— 帮你把会议纪要、Excel 数据、周报、文档整理等重复办公任务一键自动化，并量化每次任务节省的 Token 与耗时。适用于办公生产力、数据分析、效率提升场景。
-version: 0.5.0
+version: 0.6.0
 author: Elisabeth15501
 license: MIT
 tags:
@@ -154,6 +154,33 @@ v0.5 引入 **`scripts/type_registry.json` 类型字典**（标准名 ↔ 别名
 - 新增类型时，只需在 `type_registry.json` 的 `types` 里加一个标准名 + 别名列表，即可让以后的自然语言记账准确识别——**仍不改 qa / report_engine / ledger_agent / diagnose 一行**。
 
 实地验证脚本见 `tests/test_v05.py`：`python tests/test_v05.py` 自带临时账本跑完整流程，断言类型字典消歧正确、三层数字同源一致。
+
+## Skill 触发流（v0.6 接 WorkBuddy 对话事件）
+
+v0.5 以前，记账要等**用户主动说**「记一笔」或「我刚生成了周报」。v0.6 再往前一步：**让「用户完成一次任务」这件事本身自动建议记账**——不必再记着去敲那句命令。
+
+由 `scripts/skill_bridge.py` 提供，纯新增、**不改 diagnose / qa / report_engine / ledger_agent / conversation 一行**：
+
+- **完成信号识别（is_completion_event）**：一句话里含「生成了 / 做好了 / 写完了 / 交付了 …」等完成动词即视为「任务完成事件」。再细分信心：动词+成本数字 = high（直接给完整建议）；仅动词、无成本 = medium（仍触发，并提示补成本）；纯闲聊/问答 = low（不触发，交普通对话）。
+- **事件桥接（on_conversation_event）**：把一条 WorkBuddy 对话事件（如用户说「我刚生成了周报，花了1800 token 5分钟」）翻译成 `conversation.handle()` 的调用，**内部暂存待记账条目到 state["pending"]**，返回结构化 `TriggerResult`（是否触发 / 建议文案 / 待记账类型 / 信心），供 Skill / UI 渲染成「要不要记一笔？」卡片。
+- **类型字典兜底（_lenient_type）**：对于「写完了那份PPT」这类**没给成本、且别名大小写不符**的完成句，对话层 `_detect_type` 认不出类型时，桥接层用类型字典做大小写不敏感兜底匹配，仍能落到标准名「PPT制作」。
+- **确认才写回（安全默认不变）**：触发流只「建议」，绝不在用户确认前落盘。用户回「确认」交给普通对话流 `handle("确认", state)` 写回——与 v0.4/v0.5 完全一致。
+
+WorkBuddy 技能侧集成示例：
+
+```python
+from skill_bridge import on_conversation_event
+state = {}
+res = on_conversation_event("ledger.json", {
+    "role": "user", "text": "我刚生成了周报，花了1800 token 5分钟"
+}, state)
+if res.triggered:
+    show_suggestion(res.suggestion)   # 渲染「建议记账：周报生成 … 确认？」
+```
+
+> 这就是 v0.1 三层解耦 + v0.4 编排层 + v0.5 类型字典的又一次复利：v0.6 **只新增一个消费 `conversation.handle()` 的「触发适配器」**，把「人敲 CLI」换成「对话事件驱动」，内核与三层外壳零改动。
+
+实地验证脚本见 `tests/test_v06.py`：`python tests/test_v06.py` 自带临时账本，断言高/中信心完成事件触发、非完成事件不触发、触发默认 dry-run 不写账本、确认后写回且三层数字同源一致。
 
 ## 设计与合规
 
