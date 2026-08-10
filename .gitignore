@@ -12,3 +12,6 @@ _meta.json
 scripts/saving_report.py
 sample_ledger.json
 anomaly_ledger.json
+
+# 本地分析文档（每次迭代手动更新，不纳入版本控制、不推 GitHub）
+code_analysis.md

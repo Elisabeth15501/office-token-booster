@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""conversation.py — office-token-booster 对话编排层（B 线 v0.4）
+"""conversation.py — office-token-booster 对话编排层（B 线 v0.5）
 
 把三个既有外壳（qa 追问 / report_engine 报告 / ledger_agent 写回）串成
 单一对话流：用户说一句，本层理解意图、调用对应的内核能力，必要时建议记账。
 
 设计原则（与三层解耦一致）：
-- 只消费既有模块，**绝不改 qa / report_engine / ledger_agent 一行**。v0.4 完全是新增的
+- 只消费既有模块，**绝不改 qa / report_engine / ledger_agent 一行**。v0.4/v0.5 完全是新增的
   "粘合层"，复用它们暴露的纯函数（answer_followup / generate_* / propose_* / run_long_chain）。
 - 纯标准库、无第三方依赖、无网络、无硬编码密钥。
 - 状态用普通 dict 传递（state["pending"] 保存待确认条目），便于上层 Skill / 对话 UI 集成。
 - 安全默认：记账必须显式「确认」才写回账本（ledger_agent 内部仍是默认 dry-run + 备份）。
+- v0.5 新增：类型字典 type_registry.json 消除自然语言里任务类型的歧义（如『周报』→『周报生成』），
+  让记账类型始终落到标准名，不再依赖脆弱的子串猜测。
 
 用法：
   python conversation.py <ledger.json>          # 进入交互式对话
@@ -39,6 +41,25 @@ from report_engine import (                                        # noqa: E402
 
 
 # ─────────────────────────────────────────────────────────────
+# 类型字典（v0.5）：标准类型名 ↔ 别名/关键词
+# ─────────────────────────────────────────────────────────────
+
+def _load_registry():
+    """读取类型字典；文件缺失/损坏时降级为空字典（退化为 v0.4 行为）。"""
+    registry_path = Path(__file__).resolve().parent / "type_registry.json"
+    try:
+        with open(registry_path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("types", {}) or {}
+    except (FileNotFoundError, json.JSONDecodeError, ValueError):
+        return {}
+
+
+# 模块加载时读取一次类型字典（供 _detect_type 全局复用）
+_REGISTRY = _load_registry()
+
+
+# ─────────────────────────────────────────────────────────────
 # 自然语言解析
 # ─────────────────────────────────────────────────────────────
 
@@ -56,25 +77,58 @@ def _parse_numbers(text):
 
 
 def _detect_type(text, diag):
-    """判断任务类型：先看账本里已记录的类型名是否出现在话里；
-    否则抓『生成了/做了/完成了…<词>』后面的短语作为候选，再做一次模糊匹配
-    （候选是某已知类型的子串，或反之），尽量落到账本已有的标准类型名。"""
+    """判断任务类型，返回 (type, is_new) 元组。
+
+    匹配优先级（v0.5）：
+      1. 账本里已记录的标准类型名精确出现 → 直接用
+      2. 类型字典：标准名或别名/关键词出现在话里 → 映射到标准名
+      3. 短语抓取（『生成了/做了…<词>』）→ 依次用账本类型、字典做模糊匹配
+      4. 都无命中但抓到短语 → 作为「全新类型候选」返回，is_new=True（预览时让用户确认）
+
+    is_new=True 表示账本与字典都没有这个类型，确认后会作为新类型写回，
+    并提示用户在 type_registry.json 补别名以便以后识别。
+    """
     known = [d["task_type"] for d in diag.by_type if d["task_type"]]
+
+    # 1. 账本已知类型精确出现
     for k in known:
         if k in text:
-            return k
+            return k, False
+
+    # 2. 类型字典：标准名 + 别名/关键词
+    for std, aliases in _REGISTRY.items():
+        if std in text:
+            return std, False
+        for alias in (aliases or []):
+            if alias and alias in text:
+                return std, False
+
+    # 3. 短语抓取：显式记账词（『记一笔 X』）或被动完成信号（『生成了周报』『做了个PPT』）
+    #    用前瞻断言在成本词/标点前截断类型名，避免『记一笔』被拆成『笔』
     m = re.search(
-        r"(?:生成了|做了|完成了|写好?了|做好?了|产出|整理|搞完?了|记[一笔]?)\s*"
-        r"([一-龥A-Za-z0-9]{1,10}?)(?:[，,。.\s]|$)",
+        r"(?:记一笔|记录|记账|记一下|记上|登记|添加任务|新增任务|记下来|写进账本|"
+        r"生成了|做了|完成了|写好?了|做好?了|产出|整理|搞完?了)\s*"
+        r"([一-龥A-Za-z0-9]{1,12}?)"
+        r"(?=\s*(?:花了|用了|耗时|花费|消耗|占|，|,|。|\.|$))",
         text,
     )
     cand = m.group(1).strip() if m else None
-    if not cand:
-        return None
-    for k in known:
-        if cand in k or k in cand:
-            return k
-    return cand
+    if cand:
+        # 3a. 账本已知类型模糊（如 cand='周报' 命中 '周报生成'）
+        for k in known:
+            if cand in k or k in cand:
+                return k, False
+        # 3b. 字典标准名/别名模糊
+        for std, aliases in _REGISTRY.items():
+            if cand in std or std in cand:
+                return std, False
+            for alias in (aliases or []):
+                if alias and (cand in alias or alias in cand):
+                    return std, False
+        # 3c. 全新类型候选（账本与字典都没有）
+        return cand, True
+
+    return None, False
 
 
 def classify(text):
@@ -154,7 +208,7 @@ def handle(ledger_path, text, state):
 
     if intent == "record":
         tokens, minutes = _parse_numbers(text)
-        ttype = _detect_type(text, diag)
+        ttype, is_new = _detect_type(text, diag)
         if not ttype:
             return ('没认出任务类型。请这样告诉我：「记一笔 周报生成 花了1800 token 5分钟」，'
                     '或直接说类型名。')
@@ -175,6 +229,10 @@ def handle(ledger_path, text, state):
             f"  本技能消耗：{format_number(entry['skill_tokens'])} Token / {entry['skill_minutes']} 分钟",
             f"  基准估计：{format_number(entry['baseline_tokens'])} Token / {entry['baseline_minutes']} 分钟（按历史均值预填）",
         ]
+        if is_new:
+            lines.append(
+                f"  [新类型] 「{ttype}」在账本与类型字典里都没有，确认后将作为新类型记录；"
+                f"可在 scripts/type_registry.json 补充别名便于以后识别。")
         if meta["estimated_fields"]:
             lines.append(f"  [提示] 以下为估算值，建议复核：{', '.join(meta['estimated_fields'])}")
         for w in meta["warnings"]:
@@ -205,7 +263,7 @@ def handle(ledger_path, text, state):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="办公室提效 · 对话式自动记账编排（office-token-booster v0.4）")
+        description="办公室提效 · 对话式自动记账编排（office-token-booster v0.5）")
     parser.add_argument("ledger", nargs="?", help="账本 JSON 路径")
     parser.add_argument("--ledger", dest="ledger", help="账本 JSON 路径（同位置参数）")
     args = parser.parse_args()
@@ -222,8 +280,8 @@ def main():
         return 2
 
     state = {}
-    print("=== 办公室提效对话（v0.4）===")
-    print('试试：记一笔 周报生成 花了1800 token 5分钟 ｜ 哪个类型省最多？ '
+    print("=== 办公室提效对话（v0.5 · 类型字典消歧）===")
+    print('试试：我刚生成了周报，花了1800 token 5分钟 ｜ 哪个类型省最多？ '
           '｜ 生成摘要 ｜ 待自动化建议 ｜ 退出')
     while True:
         try:
