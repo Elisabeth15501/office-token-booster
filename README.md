@@ -35,7 +35,8 @@ office-token-booster/
 ├── scripts/
 │   ├── diagnose.py       # 诊断内核（纯函数）：ledger -> Diagnosis，含 baseline 护栏 + 方法论说明
 │   ├── report_engine.py  # 渲染层：消费 Diagnosis 产出完整报告 / 一页摘要（MD/HTML）+ JSON
-│   └── qa.py             # 对话式追问外壳：answer_followup(diagnosis, question)，锚定 Diagnosis 不编造
+│   ├── qa.py             # 对话式追问外壳：answer_followup(diagnosis, question)，锚定 Diagnosis 不编造
+│   └── ledger_agent.py   # 长链路 Agent（v0.3）：建议生成 + 写回账本（默认 dry-run，--apply 才写）
 ├── references/           # 扩展文档
 ├── README.md
 └── LICENSE
@@ -54,5 +55,5 @@ office-token-booster/
 
 - v0.1.0：技能骨架 + 提效账本报告引擎 + 办公任务定位
 - v0.2（已完成）：对话式诊断 —— 三层解耦（diagnose 内核 / report_engine 渲染 / qa 追问）；一页摘要首屏（`--summary`）+ 完整报告双模板；追问语料丰富（总览/比例/类型排名/自动化优先级/周趋势/明细/最差场景/耗时/方法论/可信度/完整报告路由）；报告内置 baseline 护栏与「方法论说明」，主动暴露"节省值是自报参照"前提
-- v0.3：长链路 Agent（采集任务 → 分析 → 给出省钱/提效建议 → 可选写回模板）
+- v0.3（已完成）：长链路 Agent —— `ledger_agent.py` 消费同一内核，提供「建议生成（propose_entry，按类型历史均值预填 baseline）」「待自动化建议（--targets）」「写回账本（append_entry，默认 dry-run 预览、--apply 才原子写回并自动备份）」三件套，对话层与报告层零改动
 - 目标：提交「天禧 AI Skills 苍穹共创计划」（截止 2026-12-31）

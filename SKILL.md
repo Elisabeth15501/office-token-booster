@@ -1,7 +1,7 @@
 ---
 name: office-token-booster
 description: 办公室提效助手 —— 帮你把会议纪要、Excel 数据、周报、文档整理等重复办公任务一键自动化，并量化每次任务节省的 Token 与耗时。适用于办公生产力、数据分析、效率提升场景。
-version: 0.1.0
+version: 0.3.0
 author: Elisabeth15501
 license: MIT
 tags:
@@ -109,6 +109,24 @@ metadata:
 3. **展开完整报告**：当你说"生成完整报告"，技能调用 `report_engine.py` 输出完整明细（任务类型 / 周趋势 / 执行情况 / 产出物 / 洞察建议 / 数据可信度提示），供需要落地细节时使用。
 
 > 一页摘要与完整报告共用同一份 `Diagnosis` 内核，追问题也不重新计算，保证首屏、追问、完整报告三处数字完全一致。
+
+## 长链路自动记账（v0.3 长链路 Agent）
+
+对话式诊断是「只读、响应式」外壳；v0.3 在此基础上叠加**主动管道**：任务完成后，让 Agent 自动把这笔账记回 `ledger.json`，减少你手填负担。它直接消费共享内核 `diagnose()`，对话层（`qa.py`）与报告层（`report_engine.py`）**一行都不用改**。
+
+由 `scripts/ledger_agent.py` 提供，三个动作可组合：
+
+1. **建议生成（propose_entry）**：`python ledger_agent.py <ledger.json> --type 周报生成 --skill-tokens 1800`
+   - 用该类型的历史均值预填 `baseline`（你手搓成本）估计；你也可显式传 `--baseline-tokens` / `--baseline-minutes` / `--skill-minutes` / `--note` 覆盖。
+   - 未提供或新类型时，会标记「估算字段」并提醒你补填真实手搓成本。
+2. **待自动化建议（--targets）**：`python ledger_agent.py <ledger.json> --targets`
+   - 按历史基线从高到低，列出最该做成可复用模板的任务类型。
+3. **写回账本（append_entry）**：默认 **dry-run 仅预览**，加上 `--apply` 才真正写回（写前自动备份为 `<ledger>.bak`，原子替换）。
+   - 预览会显示写回前后「任务数 / 节省 Token / 节省分钟」的变化，方便你确认。
+
+完整流程编排见 `run_long_chain(ledger_path, task_type, ...)`：load_ledger → diagnose → propose → append → 重新 diagnose。
+
+> 安全默认：不加 `--apply` 绝不改动你的账本文件。Agent 写回的仍是「用户账本」，不是平台 Trace——这与 ADR-9 上传/导出模式一致。
 
 ## 设计与合规
 
