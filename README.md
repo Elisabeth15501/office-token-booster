@@ -36,14 +36,15 @@ office-token-booster/
 │   ├── diagnose.py       # 诊断内核（纯函数）：ledger -> Diagnosis，含 baseline 护栏 + 方法论说明
 │   ├── report_engine.py  # 渲染层：消费 Diagnosis 产出完整报告 / 一页摘要（MD/HTML）+ JSON
 │   ├── qa.py             # 对话式追问外壳：answer_followup(diagnosis, question)，锚定 Diagnosis 不编造
-│   └── ledger_agent.py   # 长链路 Agent（v0.3）：建议生成 + 写回账本（默认 dry-run，--apply 才写）
+│   ├── ledger_agent.py   # 长链路 Agent（v0.3）：建议生成 + 写回账本（默认 dry-run，--apply 才写）
+│   └── conversation.py   # 对话编排层（v0.4）：意图路由，把 qa/报告/Agent 串成单一对话流，不改三层一行
 ├── references/           # 扩展文档
 ├── README.md
 └── LICENSE
 ```
 
-> 三层解耦：`diagnose.py`(内核) 是「对话式诊断」与「长链路 Agent」两个外壳的共享内核，
-> 后加 Agent 时只需在内核上叠加「建议生成 + 写回」管道，对话层代码不受影响（见 `产品发展计划时间线_双产品线.md`）。
+> 三层解耦：`diagnose.py`(内核) 是「对话式诊断」「长链路 Agent」「对话编排」三个外壳的共享内核，
+> 后加能力时只需消费内核，既有三层代码不受影响（见 `产品发展计划时间线_双产品线.md`）。
 
 ## 合规
 
@@ -56,4 +57,5 @@ office-token-booster/
 - v0.1.0：技能骨架 + 提效账本报告引擎 + 办公任务定位
 - v0.2（已完成）：对话式诊断 —— 三层解耦（diagnose 内核 / report_engine 渲染 / qa 追问）；一页摘要首屏（`--summary`）+ 完整报告双模板；追问语料丰富（总览/比例/类型排名/自动化优先级/周趋势/明细/最差场景/耗时/方法论/可信度/完整报告路由）；报告内置 baseline 护栏与「方法论说明」，主动暴露"节省值是自报参照"前提
 - v0.3（已完成）：长链路 Agent —— `ledger_agent.py` 消费同一内核，提供「建议生成（propose_entry，按类型历史均值预填 baseline）」「待自动化建议（--targets）」「写回账本（append_entry，默认 dry-run 预览、--apply 才原子写回并自动备份）」三件套，对话层与报告层零改动
+- v0.4（已完成）：对话编排层 —— 新增 `conversation.py`，用意图路由（classify + handle）把 qa 追问 / 报告 / ledger_agent 写回串成单一对话流；支持自然语言记账（解析类型与成本、历史均值预填基线、确认才写回）、被动记账建议（"我刚生成了周报，花了1800 token"也能识别）、连续对话（记账前后随意追问/看摘要/看建议），纯粘合层、不改既有三层一行
 - 目标：提交「天禧 AI Skills 苍穹共创计划」（截止 2026-12-31）

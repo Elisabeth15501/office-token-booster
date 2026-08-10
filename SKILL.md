@@ -1,7 +1,7 @@
 ---
 name: office-token-booster
 description: 办公室提效助手 —— 帮你把会议纪要、Excel 数据、周报、文档整理等重复办公任务一键自动化，并量化每次任务节省的 Token 与耗时。适用于办公生产力、数据分析、效率提升场景。
-version: 0.3.0
+version: 0.4.0
 author: Elisabeth15501
 license: MIT
 tags:
@@ -127,6 +127,21 @@ metadata:
 完整流程编排见 `run_long_chain(ledger_path, task_type, ...)`：load_ledger → diagnose → propose → append → 重新 diagnose。
 
 > 安全默认：不加 `--apply` 绝不改动你的账本文件。Agent 写回的仍是「用户账本」，不是平台 Trace——这与 ADR-9 上传/导出模式一致。
+
+## 对话式自动记账编排（v0.4 粘合层）
+
+v0.3 给了「主动记账」的原子能力；v0.4 把它们与对话式诊断、报告**串成一条连续对话**——用户说一句，技能理解意图并调用对应内核能力，任务完成时还能自动建议记账。
+
+由 `scripts/conversation.py` 提供，纯新增、**不改 qa / report_engine / ledger_agent 一行**：
+
+- **意图路由（classify + handle）**：把一句话归到 记账 / 确认 / 取消 / 生成摘要 / 生成完整报告 / 待自动化建议 / 追问 等意图，再分派给对应内核能力。
+- **自然语言记账**：说「记一笔 周报生成 花了1800 token 5分钟」，自动解析类型与成本，用该类型历史均值预填 baseline 估计并预览；你回「确认」才写回（ledger_agent 内部仍是 dry-run + 备份）。
+- **被动记账建议**：说「我刚生成了周报，花了1800 token」也能识别为记账意图（完成动词 + 成本数字），并模糊匹配到账本已有类型名，降低手填负担。
+- **连续对话**：记账前后都能直接追问（qa 接地）、看摘要（report_engine）、看自动化建议（ledger_agent），所有数字来自同一份 `Diagnosis`，三处始终一致；确认写回后还会主动弹一条「最该自动化」的建议。
+
+交互示例：`python conversation.py <ledger.json>` 进入 REPL；也可在 Python 里 `handle(ledger, text, state)` 单轮调用，便于 Skill / 对话 UI 集成（state 保存待确认条目）。
+
+> 这就是 v0.1 三层解耦的复利：v0.4 没有碰任何既有三层，只是新增一个消费它们的编排层，却让「说一句就记一笔、记完接着问」成为单一体验。
 
 ## 设计与合规
 
