@@ -38,11 +38,13 @@ office-token-booster/
 │   ├── qa.py             # 对话式追问外壳：answer_followup(diagnosis, question)，锚定 Diagnosis 不编造
 │   ├── ledger_agent.py   # 长链路 Agent（v0.3）：建议生成 + 写回账本（默认 dry-run，--apply 才写）
 │   ├── conversation.py   # 对话编排层（v0.4）：意图路由，把 qa/报告/Agent 串成单一对话流，不改三层一行
-│   ├── skill_bridge.py   # Skill 触发流（v0.6）：把对话事件翻译成 conversation.handle() 调用，自动建议记账
+│   ├── skill_bridge.py   # Skill 触发流（v0.6）：把宿主对话事件翻译成 conversation.handle() 调用，自动建议记账
+│   ├── host_hook.py      # 宿主钩子示例（v0.7）：平台无关适配器，把宿主完成事件（含真实用量）接进 skill_bridge
 │   └── type_registry.json# 类型字典（v0.5）：标准类型名 ↔ 别名/关键词，消除自然语言记账的类型歧义
 ├── tests/
 │   ├── test_v05.py       # v0.5 实地测试：自带临时账本跑完整流程，断言类型字典消歧 + 三层一致
-│   └── test_v06.py       # v0.6 实地测试：断言触发流高/中信心触发、非完成不触发、dry-run、确认后三层一致
+│   ├── test_v06.py       # v0.6 实地测试：断言触发流高/中信心触发、非完成不触发、dry-run、确认后三层一致
+│   └── test_v07.py       # v0.7 实地测试：断言真实用量事件 cost_source=event、写回采用宿主实测、三层一致、源码去品牌化
 ├── references/           # 扩展文档
 ├── README.md
 └── LICENSE
@@ -64,5 +66,6 @@ office-token-booster/
 - v0.3（已完成）：长链路 Agent —— `ledger_agent.py` 消费同一内核，提供「建议生成（propose_entry，按类型历史均值预填 baseline）」「待自动化建议（--targets）」「写回账本（append_entry，默认 dry-run 预览、--apply 才原子写回并自动备份）」三件套，对话层与报告层零改动
 - v0.4（已完成）：对话编排层 —— 新增 `conversation.py`，用意图路由（classify + handle）把 qa 追问 / 报告 / ledger_agent 写回串成单一对话流；支持自然语言记账（解析类型与成本、历史均值预填基线、确认才写回）、被动记账建议（"我刚生成了周报，花了1800 token"也能识别）、连续对话（记账前后随意追问/看摘要/看建议），纯粘合层、不改既有三层一行
 - v0.5（已完成）：类型字典消歧 —— 新增 `scripts/type_registry.json`（标准名 ↔ 别名映射）与 `tests/test_v05.py`（实地测试脚本）；`conversation._detect_type` 改为「账本已知类型 → 字典别名 → 短语抓取+字典模糊 → 全新类型候选」四级匹配，消除"周报"误判短词/多义歧义，词典缺失自动降级；qa/report_engine/ledger_agent/diagnose 仍零改动
-- v0.6（已完成）：Skill 触发流 —— 新增 `scripts/skill_bridge.py` 与 `tests/test_v06.py`；`on_conversation_event(event)` 把 WorkBuddy 对话事件翻译成 `conversation.handle()` 调用，用 `is_completion_event` 识别「任务完成」信号（高/中/低信心），自动建议记账并暂存待确认条目；`_lenient_type` 用类型字典做大小写不敏感兜底识别；触发默认 dry-run 不写账本，用户「确认」才写回；内核与三层外壳 + 编排层零改动
+- v0.6（已完成）：Skill 触发流 —— 新增 `scripts/skill_bridge.py` 与 `tests/test_v06.py`；`on_conversation_event(event)` 把**宿主对话事件**翻译成 `conversation.handle()` 调用，用 `is_completion_event` 识别「任务完成」信号（高/中/低信心），自动建议记账并暂存待确认条目；`_lenient_type` 用类型字典做大小写不敏感兜底识别；触发默认 dry-run 不写账本，用户「确认」才写回；内核与三层外壳 + 编排层零改动
+- v0.7（已完成）：真实闭环 + 去品牌化 —— 升级 `scripts/skill_bridge.py` + 新增 `scripts/host_hook.py` 与 `tests/test_v07.py`；`on_conversation_event` 现可消费宿主回报的真实用量 `event["cost"]`（实测优先级高于文本解析，`cost_source="event"`）与结构化完成标志 `event["completed"]`，把"提效"从"用户自报"升级为"实测成本"；`host_hook.py` 是平台无关的宿主钩子示例（不 import 任何平台 SDK、无网络、无硬编码密钥，满足 OpenClaw/天禧 安全红线）；`skill_bridge` 去品牌化为通用「宿主对话事件」，可同时服务 WorkBuddy / 天禧 / OpenClaw，比赛仓库可直接复用内核；内核与三层外壳 + 编排层仍零改动
 - 目标：提交「天禧 AI Skills 苍穹共创计划」（截止 2026-12-31）

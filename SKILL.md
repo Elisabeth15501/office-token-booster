@@ -1,7 +1,7 @@
 ---
 name: office-token-booster
 description: 办公室提效助手 —— 帮你把会议纪要、Excel 数据、周报、文档整理等重复办公任务一键自动化，并量化每次任务节省的 Token 与耗时。适用于办公生产力、数据分析、效率提升场景。
-version: 0.6.0
+version: 0.7.0
 author: Elisabeth15501
 license: MIT
 tags:
@@ -155,24 +155,28 @@ v0.5 引入 **`scripts/type_registry.json` 类型字典**（标准名 ↔ 别名
 
 实地验证脚本见 `tests/test_v05.py`：`python tests/test_v05.py` 自带临时账本跑完整流程，断言类型字典消歧正确、三层数字同源一致。
 
-## Skill 触发流（v0.6 接 WorkBuddy 对话事件）
+## Skill 触发流（v0.6 接宿主对话事件）
 
 v0.5 以前，记账要等**用户主动说**「记一笔」或「我刚生成了周报」。v0.6 再往前一步：**让「用户完成一次任务」这件事本身自动建议记账**——不必再记着去敲那句命令。
 
 由 `scripts/skill_bridge.py` 提供，纯新增、**不改 diagnose / qa / report_engine / ledger_agent / conversation 一行**：
 
 - **完成信号识别（is_completion_event）**：一句话里含「生成了 / 做好了 / 写完了 / 交付了 …」等完成动词即视为「任务完成事件」。再细分信心：动词+成本数字 = high（直接给完整建议）；仅动词、无成本 = medium（仍触发，并提示补成本）；纯闲聊/问答 = low（不触发，交普通对话）。
-- **事件桥接（on_conversation_event）**：把一条 WorkBuddy 对话事件（如用户说「我刚生成了周报，花了1800 token 5分钟」）翻译成 `conversation.handle()` 的调用，**内部暂存待记账条目到 state["pending"]**，返回结构化 `TriggerResult`（是否触发 / 建议文案 / 待记账类型 / 信心），供 Skill / UI 渲染成「要不要记一笔？」卡片。
+- **事件桥接（on_conversation_event）**：把一条**宿主对话事件**（如用户说「我刚生成了周报，花了1800 token 5分钟」）翻译成 `conversation.handle()` 的调用，**内部暂存待记账条目到 state["pending"]**，返回结构化 `TriggerResult`（是否触发 / 建议文案 / 待记账类型 / 信心），供 Skill / UI 渲染成「要不要记一笔？」卡片。
 - **类型字典兜底（_lenient_type）**：对于「写完了那份PPT」这类**没给成本、且别名大小写不符**的完成句，对话层 `_detect_type` 认不出类型时，桥接层用类型字典做大小写不敏感兜底匹配，仍能落到标准名「PPT制作」。
 - **确认才写回（安全默认不变）**：触发流只「建议」，绝不在用户确认前落盘。用户回「确认」交给普通对话流 `handle("确认", state)` 写回——与 v0.4/v0.5 完全一致。
 
-WorkBuddy 技能侧集成示例：
+> 本模块**不绑定任何具体平台**（WorkBuddy / 天禧 / OpenClaw 皆可），只认通用的「对话事件」契约，可直接复用到比赛仓库。
+
+宿主技能侧集成示例：
 
 ```python
 from skill_bridge import on_conversation_event
 state = {}
+# 宿主在完成一次办公任务后，把真实用量随事件一并传来（v0.7 起支持 event["cost"]）
 res = on_conversation_event("ledger.json", {
-    "role": "user", "text": "我刚生成了周报，花了1800 token 5分钟"
+    "role": "user", "text": "我刚生成了周报",
+    "cost": {"skill_tokens": 1800, "skill_minutes": 5},
 }, state)
 if res.triggered:
     show_suggestion(res.suggestion)   # 渲染「建议记账：周报生成 … 确认？」
@@ -181,6 +185,21 @@ if res.triggered:
 > 这就是 v0.1 三层解耦 + v0.4 编排层 + v0.5 类型字典的又一次复利：v0.6 **只新增一个消费 `conversation.handle()` 的「触发适配器」**，把「人敲 CLI」换成「对话事件驱动」，内核与三层外壳零改动。
 
 实地验证脚本见 `tests/test_v06.py`：`python tests/test_v06.py` 自带临时账本，断言高/中信心完成事件触发、非完成事件不触发、触发默认 dry-run 不写账本、确认后写回且三层数字同源一致。
+
+## 真实闭环 + 去品牌化（v0.7）
+
+v0.6 的触发流已能自动建议记账，但成本仍需**用户自报**（"花了1800 token"）。v0.7 再往前一步：**让宿主平台把任务的真实用量直接随事件传进来**，把"提效"从"自报"变成"实测"——这才是比赛方案 Option B 真正想要的"对比笨办法 vs 本技能"的硬数据。
+
+由 `scripts/skill_bridge.py`（升级）与 `scripts/host_hook.py`（新增）共同提供，**内核与三层外壳 + 编排层仍零改动**：
+
+- **真实成本捕获（event["cost"]）**：宿主在完成一次办公任务后，可在事件里带上 `{"skill_tokens": N, "skill_minutes": M}`。桥接层优先采用这个**实测值**，而非从自然语言里解析数字；`TriggerResult.cost_source` 标记为 `"event"`（自报则为 `"text"`），供 Skill / UI 标注"本技能实测消耗"。
+- **结构化完成标志（event["completed"]）**：宿主也能显式声明"任务已完成"（`completed=True`），优先级高于文本里的完成动词，便于平台把"产出物落地"这个动作直接映射成记账建议。
+- **宿主钩子示例（host_hook.py）**：一个**平台无关**的适配器，演示宿主如何把完成事件归一化成通用 `event` dict（`build_completion_event`）并接进 `on_conversation_event`（`on_task_completed`）。它**不 import 任何平台 SDK、不发网络请求、不硬编码密钥**，满足 OpenClaw / 天禧 安全红线；平台-specific 的 glue 由平台侧实现。
+- **去品牌化**：`skill_bridge` 不再绑定 WorkBuddy，可同时服务 WorkBuddy / 天禧 / OpenClaw；比赛仓库可直接复用内核，无需改造。
+
+> 真实闭环落地证据：宿主回报 `skill_tokens=1800` 的事件经触发→确认后，写回账本的条目 `skill_tokens` 即为 1800（非用户手敲），且确认消息 / 内核 Diagnosis / 摘要报告三处节省率完全一致（v0.7 测试已断言）。
+
+实地验证脚本见 `tests/test_v07.py`：`python tests/test_v07.py` 自带临时账本，断言真实用量事件触发且 `cost_source=event`、确认后写回采用宿主真实用量、三层数字同源、源码已去品牌化（无 WorkBuddy 绑定措辞）；`python scripts/host_hook.py --demo` 可看宿主完成事件如何触发记账建议。
 
 ## 设计与合规
 

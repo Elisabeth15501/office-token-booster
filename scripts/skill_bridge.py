@@ -1,25 +1,30 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""skill_bridge.py — office-token-booster v0.6 Skill 触发流
+"""skill_bridge.py — office-token-booster v0.7 真实闭环 · 去品牌化
 
-把已有的对话编排层 conversation.handle() 接进 WorkBuddy 的「对话事件」，
-让「用户完成一次任务」能够**自动建议记账**——而不是等用户主动说「记一笔」。
+把已有的对话编排层 conversation.handle() 接进**宿主对话平台**的「任务完成事件」，
+让「用户完成一次任务」能够**自动建议记账**——而且能带上宿主回报的**真实用量**
+（token / 分钟），把 v0.6 的「用户自报成本」升级为「实测成本」，形成真实提效闭环。
 
-设计原则（延续三层解耦 + v0.4/v0.5 粘合层）：
+设计原则（延续三层解耦 + v0.4/v0.5 粘合层 + v0.6 触发适配器）：
 - 只消费 conversation 暴露的 handle()/classify()/_detect_type()/_parse_numbers()，
   以及 diagnose 的 load_ledger/diagnose；**不改 diagnose / qa / report_engine /
   ledger_agent / conversation 一行**。
-- 纯标准库、无第三方依赖、无网络、无硬编码密钥。
+- **去品牌化**：本模块不绑定任何具体平台（WorkBuddy / 天禧 / OpenClaw 皆可），
+  只认通用的「对话事件」契约，便于直接复用到比赛仓库。
+- 纯标准库、无第三方依赖、无网络、无硬编码密钥（满足 OpenClaw/天禧 安全红线）。
 - 安全默认：触发流只「建议」，绝不在用户确认前写回账本（沿用 run_long_chain(apply=False) 默认）。
 - 触发判定与 conversation.classify 共享同一套完成信号语义，避免两套口径漂移。
 
-WorkBuddy 技能侧集成示例
+宿主技能侧集成示例
 ----------------------
     from skill_bridge import on_conversation_event
     state = {}
+    # 宿主在完成一次办公任务后，把真实用量随事件一并传来
     res = on_conversation_event("ledger.json", {
         "role": "user",
-        "text": "我刚生成了周报，花了1800 token 5分钟",
+        "text": "我刚生成了周报",
+        "cost": {"skill_tokens": 1800, "skill_minutes": 5},  # 宿主回报的真实用量
     }, state)
     if res.triggered:
         show_suggestion(res.suggestion)   # 渲染「建议记账：周报生成 … 确认？」
@@ -130,6 +135,9 @@ class TriggerResult:
     suggestion: str = ""
     pending_type: str = None
     confidence: str = "low"
+    # 成本来源：event=宿主回报真实用量 / text=自然语言解析 / none=无成本
+    # 用于 Skill/UI 标注「本技能实测消耗」还是「估算」，也便于测试断言真实闭环。
+    cost_source: str = "none"
     # True=本事件已被触发流接管，普通对话可跳过；False=未触发，调用方应交普通对话处理
     passthrough: bool = True
 
@@ -145,12 +153,17 @@ class TriggerResult:
 # ─────────────────────────────────────────────────────────────
 
 def on_conversation_event(ledger_path, event, state):
-    """处理一个 WorkBuddy 对话事件，必要时自动建议记账。
+    """处理一个宿主对话事件，必要时自动建议记账。
 
     参数
     ----
     ledger_path : 账本 JSON 路径
-    event       : dict，至少含 "text"（用户的自然语言）。可含 "role"（默认 "user"）。
+    event       : dict，至少含 "text"（用户的自然语言）。可含：
+                    - "role"（默认 "user"）
+                    - "cost"（dict，宿主回报的真实用量：
+                             {"skill_tokens": N, "skill_minutes": M}）
+                    - "completed"（bool，宿主显式声明「任务已完成」的结构化事件，
+                             优先级高于文本里的完成动词）
     state       : 调用方维护的 dict（与 handle 共用，含可选 "pending"）
 
     返回
@@ -158,13 +171,26 @@ def on_conversation_event(ledger_path, event, state):
     TriggerResult
       - 命中完成信号（high/medium）→ triggered=True，suggestion 由 conversation.handle() 生成，
         内部已把待记账条目暂存到 state["pending"]，等待用户「确认」。
+        若 event 携带真实用量（cost），则采用实测成本而非文本解析，cost_source="event"。
       - 未命中（low，纯闲聊/问答）→ triggered=False，调用方可把这句话交给普通对话。
     """
     text = (event or {}).get("text", "")
     if not text.strip():
         return TriggerResult()
 
+    # 成本来源：优先取宿主回报的真实用量
+    ev_cost = (event or {}).get("cost") or {}
+    ev_tokens = ev_cost.get("skill_tokens")
+    ev_minutes = ev_cost.get("skill_minutes")
+
     sig = is_completion_event(text)
+    # 宿主可显式声明已完成（结构化事件），优先级高于文本动词
+    if (event or {}).get("completed") is True:
+        sig = {
+            "is_completion": True,
+            "has_cost": bool(ev_tokens is not None or ev_minutes is not None),
+            "confidence": "high" if (ev_tokens is not None or ev_minutes is not None) else "medium",
+        }
 
     # 只在「明确的任务完成」信号下自动建议；纯闲聊/问答不触发，避免打扰
     if not sig["is_completion"]:
@@ -183,7 +209,17 @@ def on_conversation_event(ledger_path, event, state):
             triggered=True, intent=intent, suggestion=suggestion,
             confidence=sig["confidence"], passthrough=False)
 
-    tokens, minutes = _parse_numbers(text)
+    # 成本：宿主真实用量 > 文本解析；记录来源便于 Skill/UI 标注「实测 vs 估算」
+    text_tokens, text_minutes = _parse_numbers(text)
+    tokens = ev_tokens if ev_tokens is not None else text_tokens
+    minutes = ev_minutes if ev_minutes is not None else text_minutes
+    if ev_tokens is not None or ev_minutes is not None:
+        cost_source = "event"
+    elif text_tokens is not None or text_minutes is not None:
+        cost_source = "text"
+    else:
+        cost_source = "none"
+
     norm = f"记一笔 {ttype}"
     if tokens is not None:
         norm += f" 花了{tokens} token"
@@ -195,7 +231,8 @@ def on_conversation_event(ledger_path, event, state):
     pending_type = (state.get("pending") or {}).get("type")
     return TriggerResult(
         triggered=True, intent=intent, suggestion=suggestion,
-        pending_type=pending_type, confidence=sig["confidence"], passthrough=False)
+        pending_type=pending_type, confidence=sig["confidence"],
+        cost_source=cost_source, passthrough=False)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -231,20 +268,24 @@ def main():
             return 2
 
     demos = [
-        ("用户说：我刚生成了周报，花了1800 token 5分钟（高信心，应触发）",
+        ("用户说：我刚生成了周报，花了1800 token 5分钟（高信心，文本成本，应触发）",
          {"role": "user", "text": "我刚生成了周报，花了1800 token 5分钟"}),
+        ("宿主事件：任务完成 + 真实用量（无文本数字，应触发并采用实测成本）",
+         {"role": "user", "text": "我刚生成了周报",
+          "cost": {"skill_tokens": 1800, "skill_minutes": 5}, "completed": True}),
         ("用户说：写完了那份PPT（中信心，无成本，应触发并经字典兜底识别类型）",
          {"role": "user", "text": "写完了那份PPT"}),
         ("用户说：今天天气不错（非完成事件，不应触发）",
          {"role": "user", "text": "今天天气不错"}),
     ]
     state = {}
-    print("=== v0.6 Skill 触发流演示 ===")
+    print("=== v0.7 真实闭环演示（去品牌化）===")
     for title, ev in demos:
         print("\n-- " + title)
         res = on_conversation_event(ledger, ev, state)
         if res.triggered:
-            print(f"[触发] intent={res.intent} pending={res.pending_type} 信心={res.confidence}")
+            print(f"[触发] intent={res.intent} pending={res.pending_type} "
+                  f"信心={res.confidence} 成本来源={res.cost_source}")
             print("    建议: " + res.suggestion.replace("\n", "\n          "))
         else:
             print(f"[不触发] 信心={res.confidence}（交给普通对话处理）")
@@ -257,7 +298,7 @@ def main():
 def argparse_init():
     import argparse
     p = argparse.ArgumentParser(
-        description="办公室提效 · v0.6 Skill 触发流（接 WorkBuddy 对话事件自动建议记账）")
+        description="办公室提效 · v0.7 真实闭环（接宿主对话事件、携带真实用量自动建议记账）")
     p.add_argument("ledger", nargs="?", help="账本 JSON 路径")
     p.add_argument("--ledger", dest="ledger", help="账本 JSON 路径（同位置参数）")
     p.add_argument("--demo", action="store_true",
