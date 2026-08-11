@@ -43,9 +43,15 @@ office-token-booster/
 │   └── type_registry.json# 类型字典（v0.5）：标准类型名 ↔ 别名/关键词，消除自然语言记账的类型歧义
 ├── tests/
 │   ├── test_v05.py       # v0.5 实地测试：自带临时账本跑完整流程，断言类型字典消歧 + 三层一致
-│   ├── test_v06.py       # v0.6 实地测试：断言触发流高/中信心触发、非完成不触发、dry-run、确认后三层一致
-│   └── test_v07.py       # v0.7 实地测试：断言真实用量事件 cost_source=event、写回采用宿主实测、三层一致、源码去品牌化
+│   ├── test_v06.py       # v0.6 实地测试：触发流高/中信心触发、非完成不触发、dry-run、确认后三层一致；
+│   │                     #   另含「产品 HTML 报告附件」「数据可信度护栏」两个作品集展示用例
+│   ├── test_v07.py       # v0.7 实地测试：断言真实用量事件 cost_source=event、写回采用宿主实测、三层一致、源码去品牌化
+│   ├── test_renderer.py  # 渲染器冒烟测试（L6）：内置最小 allure-results fixture → 断言产出 HTML 含用例名/状态/环境/分类
+│   └── helpers.py        # 测试共享辅助：账本读取、Allure 附件（JSON/TEXT/HTML）、Token 节省率图表
+├── tools/
+│   └── render_allure_html.py  # 零依赖 Allure→HTML 渲染器：把 allure-results 生成单个自包含 allure-report.html（无 Java）
 ├── references/           # 扩展文档
+├── code_review_adversarial.md # 对抗式代码审查报告（正确性/健壮性/安全/架构 + 作品集增强建议）
 ├── README.md
 └── LICENSE
 ```
@@ -58,6 +64,107 @@ office-token-booster/
 - 全部本地处理，无外联、无硬编码密钥。
 - MIT 协议，自研代码，可自由学习 / 修改 / 再分发。
 - 节省值为用户自行估计的基准对比参考，**非平台计费数据**。
+
+## 测试（pytest + Allure）
+
+测试套件覆盖 v0.5–v0.7 的核心能力，并强制守卫「确认消息 / 摘要报告 / 内核 Diagnosis 三层数字同源（误差 < 0.05pp）」与「触发默认 dry-run 不改账本」等不变量。共 **19 个用例**（v0.5×3 + v0.6×7 + v0.7×7 + 渲染器×2），全绿。三层一致测试改为**直接比对内核重算值**（不再靠正则抓文案），文案改动不会让测试误伤。
+
+每个用例在报告里额外携带：
+
+- `@allure.epic("office-token-booster")` + `@allure.label("layer", …)`：架构分层标签（编排层 / 内核层 / 适配层 / 触发层 / 宿主适配层），方便按层筛选；
+- `@allure.link(...)`：源码链接，直接跳到被测函数对应行（URL 自动锚定当前 git commit SHA，本地无 git 时退化为无操作）；
+- `feature/story/severity/description/step/attach`：可读的「做了什么、看到了什么」。
+
+> 源码链接与分层标签由 `tests/helpers.py` 的 `src_link(...)` 助手统一注入；`tools/render_allure_html.py` 会在报告里渲染出「🔗 源码」与「层 / epic」徽章，审阅者在作品集里可一键溯源。
+
+**环境准备**（项目已自带 `.venv`，含 pytest 9.1.1 + allure-pytest 2.16.0）：
+
+```bash
+cd office-token-booster
+python -m venv .venv && .venv\Scripts\activate      # Windows；mac/Linux 用 source .venv/bin/activate
+pip install pytest allure-pytest
+```
+
+**运行：**
+
+```bash
+# 仅跑测试（不生成 Allure 数据）
+python -m pytest tests/ -v
+
+# 生成 Allure 原始数据
+python -m pytest tests/ -v --alluredir=allure-results
+```
+
+**标记（markers）：** `smoke`（冒烟）/ `integration`（集成）/ `regression`（回归）。可用 `-m smoke` 仅跑冒烟。
+
+**各版本测试要点：**
+
+| 版本 | 文件 | 守卫点 |
+|------|------|--------|
+| v0.5 | `test_v05.py` | 类型字典消歧（「生成了周报」→「周报生成」）、三层数字一致、对话流（追问/建议/退出） |
+| v0.6 | `test_v06.py` | 完成信号识别器、触发路由（高/中信心触发 + 字典兜底 + 非完成 passthrough + dry-run）、确认写回与三层一致；**另含「产品 HTML 报告附件」「数据可信度护栏」两个作品集展示用例** |
+| v0.7 | `test_v07.py` | 真实用量 `cost_source=event`、文本成本回退 `text`、写回条目采用宿主实测、三层一致、源码去品牌化（防回归） |
+
+> 每个用例都通过 `allure.feature/story/severity/description/step/attach` 在报告里给出可读的「做了什么、看到了什么」，方便非技术评审直接看懂。
+
+## 分享测试报告（作品集）
+
+本仓库提供一个**零依赖**的渲染器，把 Allure 原始数据变成**单个自包含 HTML**，无需 Java、无需 allure CLI、无外部 CDN，可离线双击打开，也适合直接发出去给人看。
+
+```bash
+# 1) 跑测试生成 allure-results/（见上）
+# 2) 渲染成单个 HTML（默认读取 ./allure-results → 输出 ./allure-report.html）
+python tools/render_allure_html.py --results allure-results --output allure-report.html
+```
+
+**为什么不用 `allure serve`？** `allure serve` 需要本地装 Java + allure 命令行、还要起一个本地服务，发出去给别人看很不方便。单文件 `allure-report.html` 则可以：
+
+- 直接双击在浏览器打开演示；
+- 提交进 Git 仓库，或部署到 **GitHub Pages / Netlify / 任意静态托管**，附上链接即可作为作品集；
+- 报告已自动注入运行环境（Python / pytest / allure / git commit）与失败分类（categories），观感接近官方 Allure。
+
+> 提示：本地多次运行 `--alluredir` 同名目录可能累积历史结果；渲染前建议用全新目录（如 `ar_run1`）或在 CI 里每次清空。渲染器对重复结果会按文件如实呈现，建议保证 `allure-results/` 下每个用例仅一份 `*-result.json`。
+
+### 自动生成（CI 串联）
+
+本仓库内置 GitHub Actions（`.github/workflows/ci.yml`），每次 push / PR 到 `main` 自动：
+
+1. 安装 `requirements-dev.txt`（pytest + allure-pytest）；
+2. 跑全套测试并生成 `allure-results/`；
+3. 用 `tools/render_allure_html.py` 渲染出**单个自包含 `allure-report.html`**，作为可下载的 **Allure HTML report** 构件（Artifacts）；
+4. 校验提交信息是否符合 Conventional Commits（见下）。
+
+```bash
+# 本地一键复现 CI 的产物
+python -m pytest tests/ -q --alluredir=allure-results
+python tools/render_allure_html.py --results allure-results --output allure-report.html
+```
+
+**部署到 GitHub Pages（作品集公开链接）：** 在仓库 **Settings → Pages → Source** 选「GitHub Actions」，再创建一个仓库变量 `ENABLE_PAGES=true`，CI 的 `deploy-pages` 作业即会把报告发布到 `https://<user>.github.io/office-token-booster/`。未开启时 CI 仍正常出 Artifact，不影响测试门禁。
+
+## 提交规范（Conventional Commits）与 CI
+
+为让作品集的提交历史可读、可自动归类，本仓库采用 [Conventional Commits](https://www.conventionalcommits.org/)：
+
+```
+<type>(<scope>): <subject>
+# 例：
+feat(skill_bridge): 新增宿主真实用量 cost_source 路由
+fix(conversation): _parse_numbers 支持小数与万/千单位
+test(v06): 增加成本解析健壮性回归用例
+docs(readme): 补充 CI 与分享报告说明
+ci: 新增 pytest + allure 自动渲染工作流
+```
+
+- `type` ∈ `feat` / `fix` / `test` / `docs` / `refactor` / `style` / `perf` / `build` / `ci` / `chore`；
+- `scope` 可选，建议填受影响模块（如 `skill_bridge`、`v06`、`ci`）；
+- CI 用 `.github/commitlint.py` 校验，不符合格式会**标红**（Merge / Revert 提交自动跳过）。
+
+## 代码质量与清理
+
+- 已删除与 `report_engine.py` 重复的死代码 `scripts/saving_report.py`（不再被任何模块引用）；
+- 复用取代重复：`report_engine` 直接 `from diagnose import _safe_div`、`skill_bridge` 复用 `conversation._REGISTRY`（类型字典单一事实源）、测试公共辅助抽到 `tests/helpers.py`（DRY）；
+- 对抗式代码审查与后续改进建议见 `code_review_adversarial.md`。
 
 ## 演进路线
 

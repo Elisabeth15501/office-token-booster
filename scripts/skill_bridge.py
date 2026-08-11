@@ -33,6 +33,7 @@
 桥接层本身不碰磁盘。
 """
 
+import argparse
 import json
 import os
 import re
@@ -44,21 +45,18 @@ from pathlib import Path
 # 允许从任意目录运行（与 conversation / diagnose 保持一致的 sibling import）。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from conversation import classify, handle, _detect_type, _parse_numbers  # noqa: E402
-from diagnose import load_ledger, diagnose                              # noqa: E402
+from conversation import (                                          # noqa: E402
+    classify, handle, _detect_type, _parse_numbers, _REGISTRY, COMPLETION_VERBS)
+from diagnose import load_ledger, diagnose                         # noqa: E402
 
 
 # ─────────────────────────────────────────────────────────────
 # 完成信号识别
 # ─────────────────────────────────────────────────────────────
 
-# 任务「做完了」的动词（与 conversation.classify 的被动完成信号对齐，但更宽松：
-# 这里只判定「是否完成事件」，成本数字是否齐全由 is_completion_event 单独报出）。
-_COMPLETION_VERBS = (
-    "生成了|做好?了|做完了|写完?了|写好了|写完了|完成了|做完|产出|"
-    "整理好?了|整理完|搞完?了|交付了|交付|搞定|提交了|提交|"
-    "发布了|发布|产出了|做出来"
-)
+# 完成动词复用 conversation.COMPLETION_VERBS（单一事实源，避免两套口径漂移，修复 L3）。
+# 这里只判定「是否完成事件」，成本数字是否齐全由 is_completion_event 单独报出。
+_COMPLETION_VERBS = COMPLETION_VERBS
 
 # 成本信号：花了/用了/耗时 … token/分钟
 _COST_RE = re.compile(r"(花了|用了|耗时|花费|消耗|占)\s*.{0,12}?\s*(token|分钟|分)", re.I)
@@ -98,14 +96,12 @@ def _lenient_type(text, diag):
     if tt:
         return tt, is_new
     # 兜底：大小写不敏感地在账本已知类型 / 类型字典里找
+    # 类型字典由 conversation._REGISTRY 统一加载（单一事实源，避免重复实现文件定位）。
     low = text.lower()
     for k in [d["task_type"] for d in diag.by_type]:
         if k and k.lower() in low:
             return k, False
-    try:
-        registry = _load_registry_bridge()
-    except Exception:
-        registry = {}
+    registry = _REGISTRY or {}
     for std, aliases in registry.items():
         if std and std.lower() in low:
             return std, False
@@ -115,12 +111,18 @@ def _lenient_type(text, diag):
     return None, False
 
 
-def _load_registry_bridge():
-    """读取类型字典（与 conversation._load_registry 同路径，避免重复实现文件定位）。"""
-    registry_path = Path(__file__).resolve().parent / "type_registry.json"
-    with open(registry_path, encoding="utf-8") as f:
-        data = json.load(f)
-    return data.get("types", {}) or {}
+def _coerce_int(v):
+    """把宿主回报的数值安全转 int（修复 H3）。
+
+    宿主事件输入不可全信：若 skill_tokens/skill_minutes 是字符串或畸形值，
+    统一降级为 None（视为『无成本』），绝不抛出 ValueError 导致整个触发流崩溃。
+    """
+    if v is None:
+        return None
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -140,12 +142,6 @@ class TriggerResult:
     cost_source: str = "none"
     # True=本事件已被触发流接管，普通对话可跳过；False=未触发，调用方应交普通对话处理
     passthrough: bool = True
-
-    def __getitem__(self, key):
-        return getattr(self, key)
-
-    def get(self, key, default=None):
-        return getattr(self, key, default)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -178,10 +174,10 @@ def on_conversation_event(ledger_path, event, state):
     if not text.strip():
         return TriggerResult()
 
-    # 成本来源：优先取宿主回报的真实用量
+    # 成本来源：优先取宿主回报的真实用量（修复 H3：先强制校验类型，畸形值降级为 None）
     ev_cost = (event or {}).get("cost") or {}
-    ev_tokens = ev_cost.get("skill_tokens")
-    ev_minutes = ev_cost.get("skill_minutes")
+    ev_tokens = _coerce_int(ev_cost.get("skill_tokens"))
+    ev_minutes = _coerce_int(ev_cost.get("skill_minutes"))
 
     sig = is_completion_event(text)
     # 宿主可显式声明已完成（结构化事件），优先级高于文本动词
@@ -202,19 +198,29 @@ def on_conversation_event(ledger_path, event, state):
     ttype, _is_new = _lenient_type(text, diag)
 
     if not ttype:
-        # 认不出类型：仍尝试一次对话兜底（可能追问类型），但不强行记账
+        # 认不出类型：
+        #  - 中信心（仅动词、无成本）：多半是普通对话里顺口提了句「写完了」，
+        #    不应强行接管，交还给普通对话处理（passthrough=True，修复 M5）。
+        #  - 高信心（动词+成本）：仍给一次对话兜底（追问类型），但用独立 state，
+        #    不污染调用方的待确认状态（修复 M3 串味）。
+        if sig["confidence"] == "medium":
+            return TriggerResult(confidence=sig["confidence"], passthrough=True)
         intent = classify(text)
-        suggestion = handle(ledger_path, text, state)
+        suggestion = handle(ledger_path, text, {})
         return TriggerResult(
             triggered=True, intent=intent, suggestion=suggestion,
-            confidence=sig["confidence"], passthrough=False)
+            pending_type=None, confidence=sig["confidence"], passthrough=False)
 
     # 成本：宿主真实用量 > 文本解析；记录来源便于 Skill/UI 标注「实测 vs 估算」
     text_tokens, text_minutes = _parse_numbers(text)
     tokens = ev_tokens if ev_tokens is not None else text_tokens
     minutes = ev_minutes if ev_minutes is not None else text_minutes
-    if ev_tokens is not None or ev_minutes is not None:
-        cost_source = "event"
+    tok_from_event = ev_tokens is not None
+    min_from_event = ev_minutes is not None
+    if tok_from_event and min_from_event:
+        cost_source = "event"                       # 全部来自宿主实测
+    elif tok_from_event or min_from_event:
+        cost_source = "mixed"                       # 部分实测、部分文本估算（修复 M4 误标）
     elif text_tokens is not None or text_minutes is not None:
         cost_source = "text"
     else:
@@ -228,7 +234,8 @@ def on_conversation_event(ledger_path, event, state):
 
     intent = classify(norm)            # 归一化后必为 record
     suggestion = handle(ledger_path, norm, state)
-    pending_type = (state.get("pending") or {}).get("type")
+    # 直接用已识别的类型，不依赖 state 副作用读取（修复 M3 串味）
+    pending_type = ttype
     return TriggerResult(
         triggered=True, intent=intent, suggestion=suggestion,
         pending_type=pending_type, confidence=sig["confidence"],
@@ -296,7 +303,6 @@ def main():
 
 
 def argparse_init():
-    import argparse
     p = argparse.ArgumentParser(
         description="办公室提效 · v0.7 真实闭环（接宿主对话事件、携带真实用量自动建议记账）")
     p.add_argument("ledger", nargs="?", help="账本 JSON 路径")

@@ -8,6 +8,19 @@ data*.json
 _meta.json
 *.zip
 
+# 虚拟环境
+.venv/
+venv/
+
+# 测试 / 报告生成物
+.pytest_cache/
+allure-results/
+ar_run*/
+ar_linkcheck/
+allure-results-tomb-*/
+public/
+*.log
+
 # 冗余 / 测试文件（沙箱 safe-delete 限制下保留于磁盘但退出跟踪）
 scripts/saving_report.py
 sample_ledger.json

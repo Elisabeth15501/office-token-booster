@@ -258,7 +258,12 @@ class Diagnosis:
     generated_at: str = ""
 
     def __getitem__(self, key):
-        return getattr(self, key)
+        # 缺失键抛 KeyError（而非 getattr 默认的 AttributeError），
+        # 与 .get(key, default) 的语义一致，外部 diag["foo"] 报错信息不再误导（修复 L1）。
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key) from None
 
     def get(self, key, default=None):
         return getattr(self, key, default)

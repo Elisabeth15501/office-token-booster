@@ -1,0 +1,4 @@
+# 开发 / 测试依赖（本地 venv 与 CI 共用）
+# 渲染器 tools/render_allure_html.py 仅用 Python 标准库，无需额外依赖。
+pytest>=8.0
+allure-pytest>=2.13

@@ -63,16 +63,36 @@ _REGISTRY = _load_registry()
 # 自然语言解析
 # ─────────────────────────────────────────────────────────────
 
+# 中文数量单位 → 乘数（万/千/k 常见）。
+_UNIT_MULT = {"万": 10 ** 4, "千": 10 ** 3, "k": 10 ** 3, "w": 10 ** 4}
+
+
+def _parse_number(text, keyword_re):
+    """从 text 里抽一个带可选单位（万/千/k）的数字，返回 int；抽不到/解析失败返回 None。
+
+    健壮性（修复 H1）：
+    - 支持小数：『200.5 token』→ 200（不再 int('200.5') 崩溃）；
+    - 支持单位：『1.5万 token』→ 15000（不再静默丢单位）；
+    - 解析失败（畸形输入）不抛异常，返回 None。
+    """
+    m = re.search(r"(\d[\d,]*\.?\d*)\s*(万|千|k|w)?\s*" + keyword_re, text, re.I)
+    if not m:
+        return None
+    raw = m.group(1).replace(",", "")
+    if raw in ("", "."):
+        return None
+    try:
+        val = float(raw)
+    except ValueError:
+        return None
+    unit = (m.group(2) or "").lower()
+    return int(val * _UNIT_MULT.get(unit, 1))
+
+
 def _parse_numbers(text):
-    """从自然语句里抽 token / 分钟数，抽不到返回 None。"""
-    tokens = None
-    minutes = None
-    m = re.search(r"(\d[\d,]*)\s*(?:个\s*)?(?:token|tokens|Token|TOKEN)", text)
-    if m:
-        tokens = int(m.group(1).replace(",", ""))
-    m = re.search(r"(\d[\d,]*)\s*(?:分钟|分|min|mins)", text, re.I)
-    if m:
-        minutes = int(m.group(1).replace(",", ""))
+    """从自然语句里抽 token / 分钟数，抽不到返回 None（不崩溃）。"""
+    tokens = _parse_number(text, r"(?:个\s*)?(?:token|tokens|Token|TOKEN)")
+    minutes = _parse_number(text, r"(?:分钟|分|min|mins)")
     return tokens, minutes
 
 
@@ -90,8 +110,9 @@ def _detect_type(text, diag):
     """
     known = [d["task_type"] for d in diag.by_type if d["task_type"]]
 
-    # 1. 账本已知类型精确出现
-    for k in known:
+    # 1. 账本已知类型精确出现（按长度降序，优先返回最具体的标准名，
+    #    修复 M1：避免『周报生成』被更短的『周报』先命中）
+    for k in sorted(known, key=len, reverse=True):
         if k in text:
             return k, False
 
@@ -131,6 +152,31 @@ def _detect_type(text, diag):
     return None, False
 
 
+# 确认意图识别（修复 H2）：
+# - 仅接受带边界的确认短语，避免单字『行』命中『流行』、『可以』命中疑问句；
+# - 否定/疑问语境（不…确定 / 可以吗 / 行不行 …）一律排除。
+_CONFIRM_RE = re.compile(
+    r"(好的|确认|我同意|同意|记吧|写吧|没问题|就这样|可以|确定|行吧|行的|行，)"
+    r"|^\s*行[\s，。！,.!？?]*$",
+    re.I,
+)
+_NEG_RE = re.compile(
+    r"(不(确定|行|可以|要|想|用|写|记)|能不能|是否|可否|"
+    r"吗\s*[?？]?$|行吗$|可以吗$|好吗$|行不行$|是否应该)",
+    re.I,
+)
+
+# 任务「做完了」的完成动词（单一事实源，与 skill_bridge.is_completion_event 共享，
+# 避免两套口径漂移——修复 L3）。conversation.classify 的被动完成信号与
+# skill_bridge 的完成事件判定都引用此常量。
+COMPLETION_VERBS = (
+    "生成了|做好?了|做完了|写完?了|写好了|写完了|完成了|做完|产出|"
+    "整理好?了|整理完|搞完?了|交付了|交付|搞定|提交了|提交|"
+    "发布了|发布|产出了|做出来"
+)
+_COMPLETION_VERBS_RE = re.compile(COMPLETION_VERBS)
+
+
 def classify(text):
     """把一句话归到意图：exit / cancel / confirm / record / report_summary /
     report_full / targets / followup。"""
@@ -141,7 +187,9 @@ def classify(text):
         return "exit"
     if re.search(r"(取消|不算了|不要记|别记|false|撤销)", t, re.I):
         return "cancel"
-    if re.search(r"(确认|好的|记吧|写吧|我同意|同意|可以|确定|没问题|行|就这样)", t):
+    # 确认意图：用带边界的确认词 + 否定/疑问排除（修复 H2 误判）
+    # 『这个行业报告可以吗？』『我不确定』『流行方案』不再被误判为 confirm。
+    if _CONFIRM_RE.search(t) and not _NEG_RE.search(t):
         return "confirm"
     if re.search(r"(完整报告|详细报告|九段|生成报告|全部明细|看报告)", t):
         return "report_full"
@@ -153,8 +201,9 @@ def classify(text):
     if re.search(r"(记一笔|记录|记账|记一下|记上|登记|添加任务|新增任务|记下来|写进账本)", t):
         return "record"
     # 被动完成信号：既说「完成了某任务」又给出成本数字 → 自动建议记账
+    # 完成动词复用模块级 COMPLETION_VERBS（与 skill_bridge 同一事实源，修复 L3）
     if (re.search(r"(花了|用了|耗时|花费|消耗|占)\s*.{0,12}?\s*(token|分钟|分)", t, re.I)
-            and re.search(r"(生成|完成|做完|写好|做好|产出|整理|搞完|记)", t)):
+            and _COMPLETION_VERBS_RE.search(t)):
         return "record"
     return "followup"
 
@@ -185,7 +234,8 @@ def handle(ledger_path, text, state):
     if intent == "confirm":
         pending = state.get("pending")
         if not pending:
-            return ('没有待确认的记录。你可以说：记一笔 周报生成 花了1800 token 5分钟')
+            # 没有待确认项：不返回错误式提示，降级为普通追问应答（修复 H2）
+            return answer_followup(diag, text)
         res = run_long_chain(
             ledger_path, pending["type"], apply=True, date=pending.get("date"),
             skill_tokens=pending.get("skill_tokens"),

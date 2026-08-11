@@ -159,7 +159,10 @@ def append_entry(ledger_path, entry, *, backup=True, dry_run=False):
 
     backup_path = None
     if backup and p.is_file():
-        backup_path = Path(str(p) + ".bak")
+        # 时间戳备份（修复 M2）：每次 apply 生成独立 .bak，连续写回不再覆盖首备，
+        # 可回滚到任意历史版本。文件名形如 ledger.json.20260812T142501123456.bak
+        ts = datetime.now().strftime("%Y%m%dT%H%M%S%f")
+        backup_path = Path(str(p) + f".{ts}.bak")
         backup_path.write_text(p.read_text(encoding="utf-8"), encoding="utf-8")
 
     tmp = Path(str(p) + ".tmp")

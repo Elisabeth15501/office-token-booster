@@ -40,7 +40,7 @@ import json
 import math
 import sys
 import unicodedata
-from diagnose import format_number, load_ledger, diagnose, Diagnosis
+from diagnose import format_number, load_ledger, diagnose, Diagnosis, _safe_div
 
 
 # ─────────────────────────────────────────────────────────────
@@ -60,9 +60,7 @@ def _pad_label(s, width):
     return str(s) + " " * max(0, width - _disp_width(s))
 
 
-def _safe_div(a, b):
-    """防零除：b 为 0 时返回 0。"""
-    return (a / b) if b else 0.0
+# _safe_div 已统一从 diagnose 导入（内核与渲染共用），此处不再重复定义。
 
 
 # 环形图调色板（与表格配色协调）
@@ -172,20 +170,20 @@ def generate_markdown_report(s):
     L = []
     L.append("# 办公室提效报告")
     L.append("")
-    L.append(f"> 生成时间：{s['generated_at']} ｜ 共 {s['n']} 条任务记录")
+    L.append(f"> 生成时间：{s.generated_at} ｜ 共 {s.n} 条任务记录")
     L.append("")
 
     # 一、概览
     L.append("## 一、概览")
     L.append("")
-    L.append(f"- **节省 Token**：{format_number(s['saved_tok'])}（基准 {format_number(s['total_base_tok'])} → 本技能 {format_number(s['total_skill_tok'])}），节省 **{s['token_save_pct']:.1f}%**")
-    L.append(f"- **节省时间**：{format_number(s['saved_min'])} 分钟（基准 {format_number(s['total_base_min'])} → 本技能 {format_number(s['total_skill_min'])}），节省 **{s['time_save_pct']:.1f}%**")
+    L.append(f"- **节省 Token**：{format_number(s.saved_tok)}（基准 {format_number(s.total_base_tok)} → 本技能 {format_number(s.total_skill_tok)}），节省 **{s.token_save_pct:.1f}%**")
+    L.append(f"- **节省时间**：{format_number(s.saved_min)} 分钟（基准 {format_number(s.total_base_min)} → 本技能 {format_number(s.total_skill_min)}），节省 **{s.time_save_pct:.1f}%**")
     L.append("")
 
     # 二、Token 提效可视化
     L.append("## 二、Token 提效可视化")
     L.append("")
-    L.append(build_saving_chart_md(s["by_type"]))
+    L.append(build_saving_chart_md(s.by_type))
     L.append("")
 
     # 三、任务类型统计
@@ -193,7 +191,7 @@ def generate_markdown_report(s):
     L.append("")
     L.append("| 类型 | 任务数 | 基准 Token | 本技能 Token | 省 Token | 省时间(分) | Token节省% |")
     L.append("|------|------|------|------|------|------|------|")
-    for d in s["by_type"]:
+    for d in s.by_type:
         L.append(f"| {d['task_type']} | {d['count']} | {format_number(d['baseline_tokens'])} | {format_number(d['skill_tokens'])} | "
                  f"{format_number(d['saved_tokens'])} | {format_number(d['saved_minutes'])} | {d['token_save_pct']:.1f}% |")
     L.append("")
@@ -203,7 +201,7 @@ def generate_markdown_report(s):
     L.append("")
     L.append("| 类型 | 基准 Token | 本技能 Token | 节省 Token | 节省占比 |")
     L.append("|------|------|------|------|------|")
-    for d in s["by_type"]:
+    for d in s.by_type:
         L.append(f"| {d['task_type']} | {format_number(d['baseline_tokens'])} | {format_number(d['skill_tokens'])} | "
                  f"{format_number(d['saved_tokens'])} | {d['token_save_pct']:.1f}% |")
     L.append("")
@@ -215,8 +213,8 @@ def generate_markdown_report(s):
     L.append("")
     L.append("| 能力 / 场景 | 调用次数 | 占总任务比 |")
     L.append("|------|------|------|")
-    for d in s["by_type"]:
-        ratio = _safe_div(d["count"], s["n"]) * 100
+    for d in s.by_type:
+        ratio = _safe_div(d["count"], s.n) * 100
         L.append(f"| {d['task_type']} | {d['count']} | {ratio:.1f}% |")
     L.append("")
 
@@ -226,7 +224,7 @@ def generate_markdown_report(s):
     L.append("| 日期 | 类型 | 基准(min) | 技能(min) | 省(min) | 基准(tok) | 技能(tok) | 省(tok) |")
     L.append("|------|------|------|------|------|------|------|------|")
     # 这里需要原始 tasks；compute_summary 不保留，改为在 main 注入
-    for t in s.get("tasks", []):
+    for t in s.tasks:
         bt = t.get("baseline_tokens", 0) or 0
         st = t.get("skill_tokens", 0) or 0
         bm = t.get("baseline_minutes", 0) or 0
@@ -237,7 +235,7 @@ def generate_markdown_report(s):
     # 七、产出物清单
     L.append("## 七、产出物清单")
     L.append("")
-    for i, t in enumerate(s.get("tasks", []), 1):
+    for i, t in enumerate(s.tasks, 1):
         note = t.get("note") or "（无备注）"
         L.append(f"{i}. `{t.get('date','')}` ｜ {t.get('type','')} ｜ {note}")
     L.append("")
@@ -266,17 +264,17 @@ def generate_markdown_report(s):
     L.append("")
 
     # 数据可信度提示（baseline 护栏，v0.2 新增）
-    if s["caveats"]:
+    if s.caveats:
         L.append("## 十、数据可信度提示")
         L.append("")
         L.append("> 节省值基于你填写的基准估计，以下提示用于校验「提效」声称的可信度：")
         L.append("")
-        for c in s["caveats"]:
+        for c in s.caveats:
             L.append(f"- ⚠️ {c}")
         L.append("")
 
     L.append("---")
-    L.append(f"*{s['methodology']}*")
+    L.append(f"*{s.methodology}*")
     return "\n".join(L)
 
 
@@ -292,13 +290,13 @@ def _bar_html(value, max_value, color="#2ecc71"):
 
 
 def generate_html_report(s):
-    donut = build_donut_chart(s["by_type"], title="各任务类型 节省 Token 占比",
+    donut = build_donut_chart(s.by_type, title="各任务类型 节省 Token 占比",
                               center_label="节省 Token", value_key="saved_tokens")
     insights, recs = s.insights, s.recommendations
 
     type_rows = ""
-    max_tok = max((d["baseline_tokens"] for d in s["by_type"]), default=1) or 1
-    for d in s["by_type"]:
+    max_tok = max((d["baseline_tokens"] for d in s.by_type), default=1) or 1
+    for d in s.by_type:
         type_rows += (
             f'<tr><td>{d["task_type"]}</td><td>{d["count"]}</td>'
             f'<td>{format_number(d["baseline_tokens"])}</td><td>{format_number(d["skill_tokens"])}</td>'
@@ -307,17 +305,17 @@ def generate_html_report(s):
         )
 
     week_rows = ""
-    for w in s["by_week"]:
+    for w in s.by_week:
         week_rows += (f'<tr><td>{w["week"]}</td><td>{w["count"]}</td>'
                       f'<td>{format_number(w["baseline_tokens"])}</td><td>{format_number(w["skill_tokens"])}</td>'
                       f'<td>{format_number(w["saved_tokens"])}</td></tr>')
 
     insight_html = "".join(f"<li>{x}</li>" for x in insights)
     rec_html = "".join(f"<li>{x}</li>" for x in recs)
-    caveat_html = "".join(f"<li>{c}</li>" for c in s.get("caveats", []))
+    caveat_html = "".join(f"<li>{c}</li>" for c in s.caveats)
 
     task_rows = ""
-    for t in s.get("tasks", []):
+    for t in s.tasks:
         bt = t.get("baseline_tokens", 0) or 0
         st = t.get("skill_tokens", 0) or 0
         bm = t.get("baseline_minutes", 0) or 0
@@ -348,7 +346,7 @@ def generate_html_report(s):
     """
 
     caveat_block = ""
-    if s.get("caveats"):
+    if s.caveats:
         caveat_block = (
             '<h2>五、数据可信度提示</h2>'
             '<p style="color:var(--muted)">节省值基于你填写的基准估计，以下提示用于校验「提效」声称的可信度：</p>'
@@ -361,10 +359,10 @@ def generate_html_report(s):
 <title>办公室提效报告</title>
 <style>{css}</style></head><body>
 <h1>办公室提效报告</h1>
-<p style="color:var(--muted)">生成时间：{s['generated_at']} ｜ 共 {s['n']} 条任务记录</p>
+<p style="color:var(--muted)">生成时间：{s.generated_at} ｜ 共 {s.n} 条任务记录</p>
 <div class="cards">
-  <div class="card"><div class="big">{format_number(s['saved_tok'])}</div><div class="sub">节省 Token（基准 {format_number(s['total_base_tok'])} → 本技能 {format_number(s['total_skill_tok'])}，省 {s['token_save_pct']:.1f}%）</div></div>
-  <div class="card"><div class="big">{format_number(s['saved_min'])} 分</div><div class="sub">节省时间（基准 {format_number(s['total_base_min'])} → 本技能 {format_number(s['total_skill_min'])}，省 {s['time_save_pct']:.1f}%）</div></div>
+  <div class="card"><div class="big">{format_number(s.saved_tok)}</div><div class="sub">节省 Token（基准 {format_number(s.total_base_tok)} → 本技能 {format_number(s.total_skill_tok)}，省 {s.token_save_pct:.1f}%）</div></div>
+  <div class="card"><div class="big">{format_number(s.saved_min)} 分</div><div class="sub">节省时间（基准 {format_number(s.total_base_min)} → 本技能 {format_number(s.total_skill_min)}，省 {s.time_save_pct:.1f}%）</div></div>
   <div class="card" style="display:flex;align-items:center;justify-content:center;">{donut}</div>
 </div>
 
@@ -406,9 +404,9 @@ def generate_json_report(s):
 # ─────────────────────────────────────────────────────────────
 
 def _credibility_block_md(s):
-    if s["caveats"]:
+    if s.caveats:
         lines = ["## 数据可信度", "", "> 节省值基于你填写的基准估计，以下提示用于校验「提效」声称的可信度：", ""]
-        for c in s["caveats"]:
+        for c in s.caveats:
             lines.append(f"- ⚠️ {c}")
         lines.append("")
         return "\n".join(lines)
@@ -419,16 +417,16 @@ def _credibility_block_md(s):
 
 
 def generate_markdown_summary(s):
-    top = s["by_type"][0] if s["by_type"] else None
+    top = s.by_type[0] if s.by_type else None
     L = []
     L.append("# 办公室提效 · 一页摘要")
     L.append("")
-    L.append(f"> 生成时间：{s['generated_at']} ｜ 共 {s['n']} 条任务记录")
+    L.append(f"> 生成时间：{s.generated_at} ｜ 共 {s.n} 条任务记录")
     L.append("")
     L.append("## 核心数字")
     L.append("")
-    L.append(f"- **节省 Token**：{format_number(s['saved_tok'])}（基准 {format_number(s['total_base_tok'])} → 本技能 {format_number(s['total_skill_tok'])}），省 **{s['token_save_pct']:.1f}%**")
-    L.append(f"- **节省时间**：{format_number(s['saved_min'])} 分（基准 {format_number(s['total_base_min'])} → 本技能 {format_number(s['total_skill_min'])}），省 **{s['time_save_pct']:.1f}%**")
+    L.append(f"- **节省 Token**：{format_number(s.saved_tok)}（基准 {format_number(s.total_base_tok)} → 本技能 {format_number(s.total_skill_tok)}），省 **{s.token_save_pct:.1f}%**")
+    L.append(f"- **节省时间**：{format_number(s.saved_min)} 分（基准 {format_number(s.total_base_min)} → 本技能 {format_number(s.total_skill_min)}），省 **{s.time_save_pct:.1f}%**")
     L.append("")
     L.append("## 提效主力")
     L.append("")
@@ -439,26 +437,26 @@ def generate_markdown_summary(s):
     L.append("")
     L.append("## 一句话结论")
     L.append("")
-    L.append(f"- {s['insights'][0] if s['insights'] else '暂无数据。'}")
+    L.append(f"- {s.insights[0] if s.insights else '暂无数据。'}")
     L.append("")
     L.append(_credibility_block_md(s))
     L.append("---")
-    L.append(f"*{s['methodology']}*")
+    L.append(f"*{s.methodology}*")
     L.append("")
     L.append("> 💡 可继续追问（如「哪个类型省最多」「按周趋势」「有啥建议」），或说「生成完整报告」查看完整明细。")
     return "\n".join(L)
 
 
 def generate_html_summary(s):
-    donut = build_donut_chart(s["by_type"], title="各任务类型 节省 Token 占比",
+    donut = build_donut_chart(s.by_type, title="各任务类型 节省 Token 占比",
                               center_label="节省 Token", value_key="saved_tokens")
-    top = s["by_type"][0] if s["by_type"] else None
+    top = s.by_type[0] if s.by_type else None
     top_html = (f"「{top['task_type']}」：{top['count']} 次共省 {format_number(top['saved_tokens'])} Token"
                 f"（省 {top['token_save_pct']:.1f}%）") if top else "暂无任务类型数据"
-    conclusion = s["insights"][0] if s["insights"] else "暂无数据。"
-    if s["caveats"]:
+    conclusion = s.insights[0] if s.insights else "暂无数据。"
+    if s.caveats:
         cred_html = ('<p style="color:var(--muted)">节省值基于你填写的基准估计，以下提示用于校验「提效」声称的可信度：</p>'
-                     '<ul>' + "".join(f"<li>⚠️ {c}</li>" for c in s["caveats"]) + "</ul>")
+                     '<ul>' + "".join(f"<li>⚠️ {c}</li>" for c in s.caveats) + "</ul>")
     else:
         cred_html = '<p style="color:var(--muted)">基线为你的估计参照，非计费实测；当前未发现明显异常。</p>'
 
@@ -483,16 +481,16 @@ def generate_html_summary(s):
 <title>办公室提效 · 一页摘要</title>
 <style>{css}</style></head><body>
 <h1>办公室提效 · 一页摘要</h1>
-<p style="color:var(--muted)">生成时间：{s['generated_at']} ｜ 共 {s['n']} 条任务记录</p>
+<p style="color:var(--muted)">生成时间：{s.generated_at} ｜ 共 {s.n} 条任务记录</p>
 <div class="cards">
-  <div class="card"><div class="big">{format_number(s['saved_tok'])}</div><div class="sub">节省 Token（基准 {format_number(s['total_base_tok'])} → 本技能 {format_number(s['total_skill_tok'])}，省 {s['token_save_pct']:.1f}%）</div></div>
-  <div class="card"><div class="big">{format_number(s['saved_min'])} 分</div><div class="sub">节省时间（基准 {format_number(s['total_base_min'])} → 本技能 {format_number(s['total_skill_min'])}，省 {s['time_save_pct']:.1f}%）</div></div>
+  <div class="card"><div class="big">{format_number(s.saved_tok)}</div><div class="sub">节省 Token（基准 {format_number(s.total_base_tok)} → 本技能 {format_number(s.total_skill_tok)}，省 {s.token_save_pct:.1f}%）</div></div>
+  <div class="card"><div class="big">{format_number(s.saved_min)} 分</div><div class="sub">节省时间（基准 {format_number(s.total_base_min)} → 本技能 {format_number(s.total_skill_min)}，省 {s.time_save_pct:.1f}%）</div></div>
   <div class="card" style="display:flex;align-items:center;justify-content:center;">{donut}</div>
 </div>
 <h2>提效主力</h2><p>{top_html}</p>
 <h2>一句话结论</h2><p>{conclusion}</p>
 <h2>数据可信度</h2>{cred_html}
-<p class="note">{s['methodology']}</p>
+<p class="note">{s.methodology}</p>
 </body></html>"""
     return html
 

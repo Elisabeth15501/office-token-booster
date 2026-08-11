@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 渲染报告需要 git 历史以生成源码链接（blob URL）
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dev dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests + generate Allure data
+        run: python -m pytest tests/ -v --alluredir=allure-results
+
+      - name: Render shareable HTML report (zero-dependency, no Java)
+        run: |
+          mkdir -p public
+          python tools/render_allure_html.py --results allure-results --output public/allure-report.html
+
+      - name: Upload Allure HTML report (downloadable artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: public/allure-report.html
+          if-no-files-found: warn
+
+      - name: Upload Pages artifact (for optional GitHub Pages deploy)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+      - name: Commit-message lint (Conventional Commits)
+        if: github.event_name == 'push'
+        run: python .github/commitlint.py "${{ github.event.before }}..${{ github.event.after }}"
+
+      - name: Commit-message lint (PR head)
+        if: github.event_name == 'pull_request'
+        run: python .github/commitlint.py "${{ github.event.pull_request.head.sha }}"
+
+  deploy-pages:
+    needs: test
+    if: github.ref == 'refs/heads/main' && vars.ENABLE_PAGES == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

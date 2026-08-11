@@ -18,12 +18,18 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+import allure
+
 # 让脚本无论从哪个目录运行都能 import 到 scripts/
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+# 让测试辅助模块（tests/helpers.py）可被 import
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from conversation import handle, _detect_type
 from diagnose import load_ledger, diagnose
 from report_engine import generate_markdown_summary
+from helpers import build_token_savings_chart, src_link
 
 # 4 条样本任务，覆盖常见类型，让节省率有差异
 SAMPLE = {
@@ -39,86 +45,158 @@ SAMPLE = {
     ]
 }
 
-results = []
-
-
-def step(name, ok, detail=""):
-    status = "PASS" if ok else "FAIL"
-    print(f"[{status}] {name}")
-    if detail:
-        print("        " + detail.replace("\n", "\n        "))
-    results.append(ok)
-
-
-def main():
+@pytest.fixture
+def ledger():
+    """创建临时账本，测试结束后自动删除。"""
     tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
     json.dump(SAMPLE, tmp, ensure_ascii=False)
     tmp.close()
-    ledger = tmp.name
+    path = tmp.name
+    yield path
+    allure.attach(path, name="ledger_path", attachment_type=allure.attachment_type.TEXT)
+    os.unlink(path)
 
-    try:
-        state = {}
-        init_diag = diagnose(load_ledger(ledger))
+@allure.feature("v0.5 核心功能")
+@allure.story("类型字典消歧")
+@allure.severity(allure.severity_level.CRITICAL)
+@allure.description(
+    "验证类型字典消歧：自然语言输入（如『生成了周报』）能正确映射到标准类型『周报生成』。"
+    " 覆盖全新类型识别、消歧映射、确认写回三个环节。"
+)
 
-        # ── 0. 类型字典：全新类型识别（不污染账本）──
-        tt, is_new = _detect_type("记一笔 合同审查 花了1000 token", init_diag)
-        step("全新类型识别 → (合同审查, is_new=True)",
-             tt == "合同审查" and is_new, f"返回=({tt!r}, {is_new})")
+@allure.epic("office-token-booster")
+@allure.label("layer", "编排层")
+@src_link("scripts/conversation.py", line=215, name="handle() 源码")
+@pytest.mark.smoke
+def test_v05_type_disambiguation(ledger):
+    """验证类型字典消歧：自然语言 → 标准类型映射正确。"""
+    state = {}
+    init_diag = diagnose(load_ledger(ledger))
 
-        # ── 1. 类型字典消歧：『生成了周报』→『周报生成』──
-        r1 = handle(ledger, "我刚生成了周报，花了1800 token 5分钟", state)
-        pending_type = state.get("pending", {}).get("type")
-        step("类型字典消歧：『生成了周报』→ 标准类型『周报生成』",
-             pending_type == "周报生成", f"pending.type={pending_type!r}")
-        step("预览文本含『建议记账：周报生成』", "建议记账：周报生成" in r1, r1)
+    # ── 0. 全新类型识别（不污染账本）──
+    tt, is_new = _detect_type("记一笔 合同审查 花了1000 token", init_diag)
+    allure.attach(
+        f"detected=({tt!r}, is_new={is_new})",
+        name="全新类型识别结果",
+        attachment_type=allure.attachment_type.TEXT,
+    )
+    assert tt == "合同审查" and is_new, f"全新类型识别失败: ({tt!r}, {is_new})"
 
-        # ── 2. 确认写回 ──
-        r2 = handle(ledger, "确认", state)
-        step("确认后写回（含『已记录』）", "已记录" in r2, r2)
-        n = len(json.load(open(ledger, encoding="utf-8"))["tasks"])
-        step("账本任务数 4 → 5", n == 5, f"tasks={n}")
+    # ── 1. 类型字典消歧：『生成了周报』→『周报生成』──
+    r1 = handle(ledger, "我刚生成了周报，花了1800 token 5分钟", state)
+    pending_type = state.get("pending", {}).get("type")
+    allure.attach(
+        f"pending_type={pending_type!r}\nr1_response={r1}",
+        name="消歧结果",
+        attachment_type=allure.attachment_type.TEXT,
+    )
+    assert pending_type == "周报生成", f"消歧失败: pending.type={pending_type!r}"
+    assert "建议记账：周报生成" in r1, f"预览文本缺失: {r1}"
 
-        # ── 3. 三层数字一致：确认消息 / 摘要 / 内核 同源（整体节省率）──
-        d = diagnose(load_ledger(ledger))
-        summ = generate_markdown_summary(d)
-        m_msg = re.search(r"省 ([\d.]+)%", r2)
-        msg_pct = float(m_msg.group(1)) if m_msg else None
-        # 确认消息的整体节省率来自 new_diag.token_save_pct，与重新 diagnose 的 d 同源
-        diff_msg = abs(msg_pct - d.token_save_pct) if msg_pct is not None else 999
-        step("确认消息整体节省率 == 内核 Diagnosis（三层同源）",
-             diff_msg < 0.05, f"msg={msg_pct}%  diag={d.token_save_pct:.1f}%")
-        # 摘要报告也应含同一整体节省率（内核同源，误差<0.05pp）
-        sum_pcts = [float(x) for x in re.findall(r"省 ([\d.]+)%", summ)]
-        diff_min = min((abs(p - d.token_save_pct) for p in sum_pcts), default=999)
-        step("摘要报告含与内核一致的整体节省率", diff_min < 0.05,
-             f"diag={d.token_save_pct:.1f}%  摘要中的节省率={sum_pcts}")
+    # ── 2. 确认写回 ──
+    r2 = handle(ledger, "确认", state)
+    n = len(json.load(open(ledger, encoding="utf-8"))["tasks"])
+    allure.attach(
+        f"r2_response={r2}\ntasks_count={n}",
+        name="确认写回结果",
+        attachment_type=allure.attachment_type.TEXT,
+    )
+    assert "已记录" in r2, f"确认写回失败: {r2}"
+    assert n == 5, f"账本任务数错误: {n} (期望 5)"
 
-        # ── 4. 追问 ──
-        r3 = handle(ledger, "哪个类型省最多？", state)
-        step("追问有接地回答", len(r3) > 5, r3)
+@allure.feature("v0.5 核心功能")
+@allure.story("三层数字一致性")
+@allure.severity(allure.severity_level.CRITICAL)
+@allure.description(
+    "验证确认消息、摘要报告、内核 Diagnosis 三者的节省率数值来自同一计算源，"
+    "误差 < 0.05pp，防止多处数据不一致。"
+)
+@allure.epic("office-token-booster")
+@allure.label("layer", "内核层")
+@src_link("scripts/diagnose.py", line=275, name="diagnose() 源码")
+@pytest.mark.smoke
+def test_v05_three_layer_consistency(ledger):
+    """验证三层数字一致：确认消息 / 摘要 / 内核 来源同源。"""
+    state = {}
 
-        # ── 5. 待自动化建议 ──
-        r4 = handle(ledger, "待自动化建议", state)
-        step("待自动化建议非空", "自动化" in r4 or "周报生成" in r4, r4)
+    # 先执行一轮录入以获得可验证的节省率
+    handle(ledger, "我刚生成了周报，花了1800 token 5分钟", state)
+    r2 = handle(ledger, "确认", state)
 
-        # ── 6. 退出 ──
-        r5 = handle(ledger, "退出", state)
-        step("退出对话", "再见" in r5, r5)
+    d = diagnose(load_ledger(ledger))
+    summ = generate_markdown_summary(d)
 
-    finally:
-        os.unlink(ledger)
+    # 确认消息中的节省率
+    m_msg = re.search(r"省 ([\d.]+)%", r2)
+    msg_pct = float(m_msg.group(1)) if m_msg else None
 
-    print("\n" + "=" * 48)
-    passed = sum(results)
-    total = len(results)
-    if passed == total:
-        print(f"✅ ALL TESTS PASSED ({passed}/{total})")
-        print("v0.5 类型字典消歧 + 三层一致 验证通过，可实地使用。")
-        sys.exit(0)
-    else:
-        print(f"❌ {total - passed} 项失败 ({passed}/{total})")
-        sys.exit(1)
+    diff_msg = abs(msg_pct - d.token_save_pct) if msg_pct is not None else 999
+    sum_pcts = [float(x) for x in re.findall(r"省 ([\d.]+)%", summ)]
+    diff_min = min((abs(p - d.token_save_pct) for p in sum_pcts), default=999)
+
+    allure.attach(
+        f"msg_pct={msg_pct}%\n"
+        f"diag.token_save_pct={d.token_save_pct:.1f}%\n"
+        f"diff_msg={diff_msg}\n"
+        f"summary_pcts={sum_pcts}\n"
+        f"diff_min={diff_min}",
+        name="三层节省率对比",
+        attachment_type=allure.attachment_type.TEXT,
+    )
+
+    # HTML visualization: token savings bar chart
+    tasks = json.load(open(ledger, encoding="utf-8"))["tasks"]
+    chart_html = build_token_savings_chart(tasks, d.token_save_pct)
+    allure.attach(
+        chart_html,
+        name="Token 节省率可视化",
+        attachment_type=allure.attachment_type.HTML,
+    )
+
+    # 与内核 Diagnosis 一致
+    assert diff_msg < 0.05, f"确认消息节省率不一致: msg={msg_pct}% diag={d.token_save_pct:.1f}%"
+
+    # 摘要报告也一致
+    assert diff_min < 0.05, f"摘要报告节省率不一致: diag={d.token_save_pct:.1f}% 摘要={sum_pcts}"
+
+@allure.feature("v0.5 核心功能")
+@allure.story("对话流程完整性")
+@allure.severity(allure.severity_level.NORMAL)
+@allure.description(
+    "验证完整对话流程：追问『哪个类型省最多？』、『待自动化建议』、『退出』均能正常响应。"
+)
+@allure.epic("office-token-booster")
+@allure.label("layer", "编排层")
+@src_link("scripts/conversation.py", line=215, name="handle() 源码")
+@pytest.mark.smoke
+def test_v05_conversation_flow(ledger):
+    """验证完整对话流程：追问 → 建议 → 退出。"""
+    state = {}
+
+    # 跑一次完整录入
+    handle(ledger, "我刚生成了周报，花了1800 token 5分钟", state)
+    handle(ledger, "确认", state)
+
+    # ── 4. 追问 ──
+    r3 = handle(ledger, "哪个类型省最多？", state)
+    allure.attach(r3, name="追问回答", attachment_type=allure.attachment_type.TEXT)
+    assert len(r3) > 5, f"追问回答过短: {r3}"
+
+    # ── 5. 待自动化建议 ──
+    r4 = handle(ledger, "待自动化建议", state)
+    allure.attach(r4, name="自动化建议", attachment_type=allure.attachment_type.TEXT)
+    assert "自动化" in r4 or "周报生成" in r4, f"建议缺失: {r4}"
+
+    # ── 6. 退出 ──
+    r5 = handle(ledger, "退出", state)
+    allure.attach(r5, name="退出响应", attachment_type=allure.attachment_type.TEXT)
+    assert "再见" in r5, f"退出对话失败: {r5}"
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    _root = Path(__file__).resolve().parent.parent
+    _report_dir = str(_root / "allure-results")
+    print(f"Allure 数据 → {_report_dir}")
+    print(f"查看报告: allure serve {_report_dir}")
+    sys.exit(pytest.main([__file__, "-v", f"--alluredir={_report_dir}"]))
