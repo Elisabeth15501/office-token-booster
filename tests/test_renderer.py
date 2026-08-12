@@ -59,6 +59,11 @@ def results_dir():
             {"name": "feature", "value": "v0.6 Skill 触发流"},
             {"name": "story", "value": "确认写回与三层一致"},
             {"name": "severity", "value": "critical"},
+            {"name": "test_type", "value": "positive"},
+            {"name": "component", "value": "diagnose"},
+            {"name": "risk_area", "value": "data_integrity"},
+            {"name": "priority", "value": "P0"},
+            {"name": "suite", "value": "v0.6"},
         ],
         "description": "renderer smoke fixture: passed case",
         "links": [{"url": "https://github.com/Elisabeth15501/office-token-booster/blob/main/scripts/diagnose.py#L275",
@@ -109,6 +114,13 @@ def test_renderer_smoke(results_dir):
     assert "tc-link" in html, "渲染结果缺失源码链接块"
     assert "diagnose() 源码" in html, "渲染结果缺失源码链接名称"
     assert "href=" in html, "渲染结果缺失链接 href"
+
+    # 自定义维度标签（docs/allure-labels.md 定义）也要呈现为徽章
+    assert "test_type: positive" in html, "渲染结果缺失 test_type 维度徽章"
+    assert "component: diagnose" in html, "渲染结果缺失 component 维度徽章"
+    assert "risk_area: data_integrity" in html, "渲染结果缺失 risk_area 维度徽章"
+    assert "priority: P0" in html, "渲染结果缺失 priority 维度徽章"
+    assert "suite: v0.6" in html, "渲染结果缺失 suite 维度徽章"
 
     # 失败信息也要呈现
     assert "boom" in html, "渲染结果未呈现失败信息"

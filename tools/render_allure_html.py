@@ -242,6 +242,19 @@ def render_test_card(idx, result, results_dir):
 
     links_html = render_links(result.get("links", []))
 
+    # 自定义维度标签：test_type / component / risk_area / priority / suite
+    # （这些维度在 docs/allure-labels.md 中定义，便于在作品集报告里按维度筛选/分组）
+    custom_names = ("test_type", "component", "risk_area", "priority", "suite")
+    custom_badges = []
+    for cn in custom_names:
+        cv = labels.get(cn)
+        if cv:
+            custom_badges.append(
+                f'<span class="badge dim" data-dim="{html.escape(cn)}">'
+                f'{html.escape(cn)}: {html.escape(cv)}</span>'
+            )
+    custom_html = f'<div class="tc-dims">{("".join(custom_badges))}</div>' if custom_badges else ""
+
     duration = fmt_duration(result.get("stop", 0) - result.get("start", 0))
     desc = result.get("description")
     desc_html = f'<div class="tc-desc">{html.escape(desc)}</div>' if desc else ""
@@ -263,6 +276,7 @@ def render_test_card(idx, result, results_dir):
         <span class="tc-dur">{duration}</span>
       </div>
       <div class="tc-badges">{''.join(badges)}</div>
+      {custom_html}
       {desc_html}
       {links_html}
       <div class="tc-body">
@@ -361,6 +375,13 @@ th,td{{border:1px solid var(--border);padding:6px 10px;text-align:left;}}
 .badge.sev{{color:#fff;}}
 .badge.epic{{background:#f3e8ff;color:#6b21a8;font-weight:700;}}
 .badge.layer{{background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;}}
+.tc-dims{{margin:6px 0;display:flex;gap:6px;flex-wrap:wrap;}}
+.badge.dim{{background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:6px;font-size:11px;}}
+.badge.dim[data-dim="test_type"]{{color:#7c3aed;border-color:#ddd6fe;}}
+.badge.dim[data-dim="component"]{{color:#0369a1;border-color:#bae6fd;}}
+.badge.dim[data-dim="risk_area"]{{color:#b45309;border-color:#fde68a;}}
+.badge.dim[data-dim="priority"]{{color:#be123c;border-color:#fecdd3;}}
+.badge.dim[data-dim="suite"]{{color:#047857;border-color:#a7f3d0;}}
 .tc-links{{margin:6px 0;font-size:12px;}}
 .tc-link{{color:var(--accent);text-decoration:none;font-weight:600;}}
 .tc-link:hover{{text-decoration:underline;}}

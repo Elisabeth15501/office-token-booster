@@ -67,15 +67,16 @@ office-token-booster/
 
 ## 测试（pytest + Allure）
 
-测试套件覆盖 v0.5–v0.7 的核心能力，并强制守卫「确认消息 / 摘要报告 / 内核 Diagnosis 三层数字同源（误差 < 0.05pp）」与「触发默认 dry-run 不改账本」等不变量。共 **19 个用例**（v0.5×3 + v0.6×7 + v0.7×7 + 渲染器×2），全绿。三层一致测试改为**直接比对内核重算值**（不再靠正则抓文案），文案改动不会让测试误伤。
+测试套件覆盖 v0.5–v0.7 的核心能力，并强制守卫「确认消息 / 摘要报告 / 内核 Diagnosis 三层数字同源（误差 < 0.05pp）」与「触发默认 dry-run 不改账本」等不变量；另含 **17 个负向/边界测试**（`test_boundary.py`）专门验证极端输入、畸形数据与空值下的优雅降级。共 **36 个用例**（v0.5×3 + v0.6×7 + v0.7×7 + 渲染器×2 + 边界×17），全绿。三层一致测试改为**直接比对内核重算值**（不再靠正则抓文案），文案改动不会让测试误伤。
 
 每个用例在报告里额外携带：
 
-- `@allure.epic("office-token-booster")` + `@allure.label("layer", …)`：架构分层标签（编排层 / 内核层 / 适配层 / 触发层 / 宿主适配层），方便按层筛选；
+- `@allure.epic("office-token-booster")` + `@allure.label("layer", …)`：架构分层标签（内核层 / 编排层 / 触发层 / 宿主适配层 / 适配层 / 写回层 / 渲染层），方便按层筛选；
+- `@allure.label("test_type", …)` / `component` / `risk_area` / `priority` / `suite`：一组**多维度标签**（详见 [`docs/allure-labels.md`](docs/allure-labels.md)），可按「正向/负向/边界/回归」、被测模块、业务风险域、优先级、版本套件在报告里分组/筛选，方便作品集展示测试设计思路；
 - `@allure.link(...)`：源码链接，直接跳到被测函数对应行（URL 自动锚定当前 git commit SHA，本地无 git 时退化为无操作）；
 - `feature/story/severity/description/step/attach`：可读的「做了什么、看到了什么」。
 
-> 源码链接与分层标签由 `tests/helpers.py` 的 `src_link(...)` 助手统一注入；`tools/render_allure_html.py` 会在报告里渲染出「🔗 源码」与「层 / epic」徽章，审阅者在作品集里可一键溯源。
+> 源码链接、分层标签与多维度标签由 `tests/helpers.py` 的 `src_link(...)` 助手统一注入；`tools/render_allure_html.py` 会在报告里渲染出「🔗 源码」与「层 / epic / feature / story / severity / test_type / component / risk_area / priority / suite」等徽章，审阅者在作品集里可一键溯源与按维度浏览。
 
 **环境准备**（项目已自带 `.venv`，含 pytest 9.1.1 + allure-pytest 2.16.0）：
 
@@ -104,6 +105,7 @@ python -m pytest tests/ -v --alluredir=allure-results
 | v0.5 | `test_v05.py` | 类型字典消歧（「生成了周报」→「周报生成」）、三层数字一致、对话流（追问/建议/退出） |
 | v0.6 | `test_v06.py` | 完成信号识别器、触发路由（高/中信心触发 + 字典兜底 + 非完成 passthrough + dry-run）、确认写回与三层一致；**另含「产品 HTML 报告附件」「数据可信度护栏」两个作品集展示用例** |
 | v0.7 | `test_v07.py` | 真实用量 `cost_source=event`、文本成本回退 `text`、写回条目采用宿主实测、三层一致、源码去品牌化（防回归） |
+| 边界/负向 | `test_boundary.py` | 跨模块极端输入与畸形数据：空/None/负数/超大数/损坏 JSON/零基线/空账本等，验证「优雅降级不崩溃」；全维度打标（layer/test_type/component/risk_area/priority/suite） |
 
 > 每个用例都通过 `allure.feature/story/severity/description/step/attach` 在报告里给出可读的「做了什么、看到了什么」，方便非技术评审直接看懂。
 

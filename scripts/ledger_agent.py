@@ -141,8 +141,12 @@ def append_entry(ledger_path, entry, *, backup=True, dry_run=False):
     """
     p = Path(ledger_path)
     if p.is_file():
-        with open(p, "r", encoding="utf-8") as f:
-            ledger = json.load(f)
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                ledger = json.load(f)
+        except (json.JSONDecodeError, ValueError):
+            # 损坏的账本：从空账本重建，原文件会在下方备份步骤留存（不丢数据）
+            ledger = {"tasks": []}
         if not isinstance(ledger, dict):
             ledger = {"tasks": []}
     else:

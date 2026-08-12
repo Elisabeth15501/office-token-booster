@@ -57,6 +57,8 @@ def load_ledger(path):
         raise FileNotFoundError(f"账本文件不存在: {path}")
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError("ledger.json 顶层必须是 JSON 对象（含 tasks 数组）")
     tasks = data.get("tasks", [])
     if not isinstance(tasks, list):
         raise ValueError("ledger.json 顶层必须有 tasks 数组")
