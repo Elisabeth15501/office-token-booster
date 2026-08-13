@@ -40,6 +40,7 @@ import json
 import math
 import sys
 import unicodedata
+from pathlib import Path
 from diagnose import format_number, load_ledger, diagnose, Diagnosis, _safe_div
 
 
@@ -144,6 +145,100 @@ def build_saving_chart_md(by_type, value_key="saved_tokens", title="各任务类
     return "```\n" + "\n".join(out) + "\n```"
 
 
+def build_trend_line_chart(weeks, value_key="saved_tokens", title="按周节省 Token 趋势"):
+    """自包含内联 SVG 折线/面积图（浅/深主题兼容，与 donut 同风格）。
+
+    weeks: list[dict]（含 week / value_key）。无数据返回空串；不依赖外部 CDN。
+    """
+    pts = [(w.get("week", ""), w.get(value_key, 0) or 0) for w in weeks]
+    if not pts:
+        return ""
+    n = len(pts)
+    W, H = 480, 200
+    pad_l, pad_r, pad_t, pad_b = 44, 18, 18, 30
+    plot_w = W - pad_l - pad_r
+    plot_h = H - pad_t - pad_b
+    maxv = max(v for _, v in pts) or 1
+    xs = [pad_l + (plot_w * i / (n - 1)) if n > 1 else pad_l + plot_w / 2 for i in range(n)]
+    ys = [pad_t + plot_h * (1 - v / maxv) for _, v in pts]
+
+    grid = []
+    for g in range(5):
+        gy = pad_t + plot_h * g / 4
+        gv = maxv * (1 - g / 4)
+        grid.append(
+            f'<line x1="{pad_l}" y1="{gy:.1f}" x2="{W - pad_r}" y2="{gy:.1f}" '
+            f'stroke="var(--table-border)" stroke-width="1"/>')
+        grid.append(
+            f'<text x="{pad_l - 6}" y="{gy + 4:.1f}" text-anchor="end" '
+            f'font-size="10" style="fill:var(--muted)">{format_number(gv)}</text>')
+
+    line_pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys))
+    area_pts = f"{pad_l},{pad_t + plot_h} " + line_pts + f" {xs[-1]:.1f},{pad_t + plot_h}"
+    dots = "".join(
+        f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.5" fill="var(--accent)" '
+        f'stroke="var(--bg)" stroke-width="1.5"><title>{wk}: {format_number(v)}</title></circle>'
+        for (wk, v), x, y in zip(pts, xs, ys))
+    xlabels = "".join(
+        f'<text x="{x:.1f}" y="{H - 10}" text-anchor="middle" font-size="10" '
+        f'style="fill:var(--muted)">{wk.replace("2026-", "W").replace("2025-", "W")}</text>'
+        for (wk, _), x in zip(pts, xs))
+
+    return f"""    <div class="chart-line">
+      <div class="chart-title">{title}</div>
+      <svg width="{W}" height="{H}" viewBox="0 0 {W} {H}" role="img" aria-label="{title}">
+        {''.join(grid)}
+        <polygon points="{area_pts}" fill="var(--accent)" opacity="0.12"/>
+        <polyline points="{line_pts}" fill="none" stroke="var(--accent)" stroke-width="2.5"
+                  stroke-linejoin="round" stroke-linecap="round"/>
+        {dots}
+        {xlabels}
+      </svg>
+    </div>"""
+
+
+def _fmt_pct(p):
+    return "—" if p is None else f"{p:+.1f}%"
+
+
+def build_compare_card(pc):
+    """「本期 vs 上期」对比卡片（消费 Diagnosis.period_compare）。无数据返回空串。"""
+    if not pc:
+        return ""
+    arrow = {"up": "▲", "down": "▼", "flat": "▬", "new": "✦"}.get(pc["direction"], "")
+    cur, prev = pc["current"], pc["previous"]
+    return f"""
+    <div class="cmp-card">
+      <div class="cmp-title">📈 本期 vs 上期（{pc['current_week']} 对比 {pc['previous_week']}）</div>
+      <div class="cmp-grid">
+        <div><span class="cmp-k">省 Token</span><span class="cmp-v">{format_number(cur['saved_tokens'])}</span>
+            <span class="cmp-d {pc['direction']}">{arrow} {_fmt_pct(pc['saved_tokens_pct'])}</span></div>
+        <div><span class="cmp-k">任务数</span><span class="cmp-v">{cur['count']}</span>
+            <span class="cmp-d {pc['direction']}">{arrow} {_fmt_pct(pc['count_pct'])}</span></div>
+        <div><span class="cmp-k">省时间</span><span class="cmp-v">{format_number(cur['saved_minutes'])}分</span>
+            <span class="cmp-d {pc['direction']}">{arrow} {_fmt_pct(pc['saved_minutes_pct'])}</span></div>
+      </div>
+      <div class="cmp-note">上期：省 {format_number(prev['saved_tokens'])} Token / {prev['count']} 次任务</div>
+    </div>"""
+
+
+def build_roi_card(roi_targets, top_n=3):
+    """「最该自动化（按 ROI 排序）」卡片（消费 Diagnosis.roi_targets）。无数据返回空串。"""
+    if not roi_targets:
+        return ""
+    items = []
+    for t in roi_targets[:top_n]:
+        items.append(
+            f'<li><b>{t["task_type"]}</b> — ROI≈{t["roi_score"]} '
+            f'（预估月省 {format_number(t["monthly_saved_tokens"])} Token，'
+            f'接入约 {t["effort_hours"]} 人时）</li>')
+    return f"""
+    <div class="roi-card">
+      <div class="cmp-title">🤖 最该自动化（按 ROI 排序 Top {top_n}）</div>
+      <ul>{''.join(items)}</ul>
+    </div>"""
+
+
 # ─────────────────────────────────────────────────────────────
 # 办公数据层（消费 ledger.json）
 # ─────────────────────────────────────────────────────────────
@@ -179,6 +274,16 @@ def generate_markdown_report(s):
     L.append(f"- **节省 Token**：{format_number(s.saved_tok)}（基准 {format_number(s.total_base_tok)} → 本技能 {format_number(s.total_skill_tok)}），节省 **{s.token_save_pct:.1f}%**")
     L.append(f"- **节省时间**：{format_number(s.saved_min)} 分钟（基准 {format_number(s.total_base_min)} → 本技能 {format_number(s.total_skill_min)}），节省 **{s.time_save_pct:.1f}%**")
     L.append("")
+
+    # 本期 vs 上期（v0.8 提效洞察）
+    if s.period_compare:
+        pc = s.period_compare
+        arrow = {"up": "▲", "down": "▼", "flat": "▬", "new": "✦"}.get(pc["direction"], "")
+        pct = "—" if pc["saved_tokens_pct"] is None else f"{pc['saved_tokens_pct']:+.1f}%"
+        L.append(f"- **本期 vs 上期**（{pc['current_week']} 对比 {pc['previous_week']}）："
+                 f"省 {format_number(pc['current']['saved_tokens'])} Token（{arrow} {pct}），"
+                 f"任务 {pc['current']['count']} 次。")
+        L.append("")
 
     # 二、Token 提效可视化
     L.append("## 二、Token 提效可视化")
@@ -310,6 +415,10 @@ def generate_html_report(s):
                       f'<td>{format_number(w["baseline_tokens"])}</td><td>{format_number(w["skill_tokens"])}</td>'
                       f'<td>{format_number(w["saved_tokens"])}</td></tr>')
 
+    trend_chart = build_trend_line_chart(s.by_week)
+    compare_card = build_compare_card(s.period_compare)
+    roi_card = build_roi_card(s.roi_targets)
+
     insight_html = "".join(f"<li>{x}</li>" for x in insights)
     rec_html = "".join(f"<li>{x}</li>" for x in recs)
     caveat_html = "".join(f"<li>{c}</li>" for c in s.caveats)
@@ -338,6 +447,17 @@ def generate_html_report(s):
     .chart-pie{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin:12px 0;}
     .legend{font-size:13px;} .legend-item{margin:2px 0;}
     .swatch{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;}
+    .chart-line{margin:12px 0 4px;} .chart-title{font-size:14px;font-weight:600;margin-bottom:6px;}
+    .cmp-card,.roi-card{background:#f9fafb;border:1px solid var(--table-border);border-radius:10px;
+          padding:14px;margin:14px 0;}
+    .cmp-title{font-size:14px;font-weight:600;margin-bottom:10px;}
+    .cmp-grid{display:flex;gap:18px;flex-wrap:wrap;}
+    .cmp-grid>div{display:flex;flex-direction:column;gap:2px;min-width:120px;}
+    .cmp-k{font-size:12px;color:var(--muted);} .cmp-v{font-size:20px;font-weight:700;}
+    .cmp-d{font-size:13px;font-weight:600;} .cmp-d.up{color:#16a34a;} .cmp-d.down{color:#dc2626;}
+    .cmp-d.flat{color:var(--muted);} .cmp-d.new{color:#2563eb;}
+    .cmp-note{font-size:12px;color:var(--muted);margin-top:8px;}
+    .roi-card ul{margin:0;padding-left:18px;} .roi-card li{margin:3px 0;font-size:13px;}
     table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px;}
     th,td{border:1px solid var(--table-border);padding:6px 8px;text-align:right;}
     th:first-child,td:first-child{text-align:left;}
@@ -371,8 +491,11 @@ def generate_html_report(s):
 <tbody>{type_rows}</tbody></table>
 
 <h2>二、按周趋势</h2>
+{trend_chart}
+{compare_card}
 <table><thead><tr><th>周</th><th>任务数</th><th>基准 Token</th><th>本技能 Token</th><th>省 Token</th></tr></thead>
 <tbody>{week_rows}</tbody></table>
+{roi_card}
 
 <h2>三、任务执行情况</h2>
 <table><thead><tr><th>日期</th><th>类型</th><th>基准(min)</th><th>技能(min)</th><th>省(min)</th><th>基准(tok)</th><th>技能(tok)</th><th>省(tok)</th></tr></thead>
@@ -454,6 +577,9 @@ def generate_html_summary(s):
     top_html = (f"「{top['task_type']}」：{top['count']} 次共省 {format_number(top['saved_tokens'])} Token"
                 f"（省 {top['token_save_pct']:.1f}%）") if top else "暂无任务类型数据"
     conclusion = s.insights[0] if s.insights else "暂无数据。"
+    trend_chart = build_trend_line_chart(s.by_week)
+    compare_card = build_compare_card(s.period_compare)
+    roi_card = build_roi_card(s.roi_targets)
     if s.caveats:
         cred_html = ('<p style="color:var(--muted)">节省值基于你填写的基准估计，以下提示用于校验「提效」声称的可信度：</p>'
                      '<ul>' + "".join(f"<li>⚠️ {c}</li>" for c in s.caveats) + "</ul>")
@@ -473,6 +599,17 @@ def generate_html_summary(s):
     .chart-pie{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin:12px 0;}
     .legend{font-size:13px;} .legend-item{margin:2px 0;}
     .swatch{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;}
+    .chart-line{margin:12px 0 4px;} .chart-title{font-size:14px;font-weight:600;margin-bottom:6px;}
+    .cmp-card,.roi-card{background:#f9fafb;border:1px solid var(--table-border);border-radius:10px;
+          padding:14px;margin:14px 0;}
+    .cmp-title{font-size:14px;font-weight:600;margin-bottom:10px;}
+    .cmp-grid{display:flex;gap:18px;flex-wrap:wrap;}
+    .cmp-grid>div{display:flex;flex-direction:column;gap:2px;min-width:120px;}
+    .cmp-k{font-size:12px;color:var(--muted);} .cmp-v{font-size:20px;font-weight:700;}
+    .cmp-d{font-size:13px;font-weight:600;} .cmp-d.up{color:#16a34a;} .cmp-d.down{color:#dc2626;}
+    .cmp-d.flat{color:var(--muted);} .cmp-d.new{color:#2563eb;}
+    .cmp-note{font-size:12px;color:var(--muted);margin-top:8px;}
+    .roi-card ul{margin:0;padding-left:18px;} .roi-card li{margin:3px 0;font-size:13px;}
     ul{margin:6px 0;} .note{color:var(--muted);font-size:12px;margin-top:18px;}
     """
     html = f"""<!DOCTYPE html>
@@ -487,6 +624,9 @@ def generate_html_summary(s):
   <div class="card"><div class="big">{format_number(s.saved_min)} 分</div><div class="sub">节省时间（基准 {format_number(s.total_base_min)} → 本技能 {format_number(s.total_skill_min)}，省 {s.time_save_pct:.1f}%）</div></div>
   <div class="card" style="display:flex;align-items:center;justify-content:center;">{donut}</div>
 </div>
+{trend_chart}
+{compare_card}
+{roi_card}
 <h2>提效主力</h2><p>{top_html}</p>
 <h2>一句话结论</h2><p>{conclusion}</p>
 <h2>数据可信度</h2>{cred_html}

@@ -83,7 +83,7 @@ def test_classify_empty_input(): ...
 | `type_disambiguation` | 类型消歧：自然语言正确映射标准类型 | `_detect_type`、字典兜底 |
 | `debranding` | 去品牌化：不绑定具体平台 | `test_v07_debranding` |
 | `real_closed_loop` | 真实闭环：宿主实测成本写回 | `test_v07_confirm_real_closed_loop` |
-| `ui_rendering` | UI 渲染：报告/HTML 产出正确 | `generate_html_report`、renderer |
+| `ui_rendering` | UI 渲染：报告/HTML 产出正确 | `generate_html_report`、renderer、`test_v08`（趋势/对比/ROI 卡片） |
 | `credibility` | 数据可信度：主动暴露前提、不虚高 | `detect_baseline_anomalies` |
 
 **用法示例：**
@@ -164,6 +164,7 @@ def test_v07_cost_source_mixed(ledger): ...
 | `test_v07.py` | 7 | epic, layer, src_link, feature, story, severity, title, description |
 | `test_renderer.py` | 2 | feature, title（renderer 不依赖 allure-pytest 时退化）；fixture 含自定义维度徽章断言 |
 | `test_boundary.py` | 17 | 全维度覆盖（layer / test_type / component / risk_area / priority / suite / epic / src_link / feature / story / severity / title / description） |
+| `test_v08.py` | 8 | epic, layer, src_link, feature, story, severity, title, description；全维度（test_type / component / risk_area / priority / suite），覆盖内核层（diagnose）与渲染层（report_engine） |
 
 ---
 

@@ -65,6 +65,86 @@ def load_ledger(path):
     return tasks
 
 
+# ─────────────────────────────────────────────────────────────
+# v0.8 提效洞察：周期对比 + 自动化 ROI 评分（纯函数，内核单一事实源）
+# ─────────────────────────────────────────────────────────────
+
+def compute_period_compare(by_week):
+    """对比「最近一周 vs 上一周」的提效变化（消费已聚合的 by_week）。
+
+    返回 dict：current/previous 的 saved_tokens/count/saved_minutes，以及
+    各维度 delta / pct / direction（up/down/flat/new）。数据不足两周时返回 None。
+    pct 在上一期为 0 时记为 None（避免除零，由 direction="new" 表达）。
+    """
+    if not by_week or len(by_week) < 2:
+        return None
+    cur, prev = by_week[-1], by_week[-2]
+
+    def _pct(cur_v, prev_v):
+        return None if prev_v == 0 else (cur_v - prev_v) / prev_v * 100
+
+    saved_delta = cur["saved_tokens"] - prev["saved_tokens"]
+    if prev["saved_tokens"] == 0 and cur["saved_tokens"] > 0:
+        direction = "new"
+    elif saved_delta > 0:
+        direction = "up"
+    elif saved_delta < 0:
+        direction = "down"
+    else:
+        direction = "flat"
+
+    return {
+        "current_week": cur["week"],
+        "previous_week": prev["week"],
+        "current": {"saved_tokens": cur["saved_tokens"], "count": cur["count"],
+                    "saved_minutes": cur["saved_minutes"]},
+        "previous": {"saved_tokens": prev["saved_tokens"], "count": prev["count"],
+                     "saved_minutes": prev["saved_minutes"]},
+        "saved_tokens_delta": saved_delta,
+        "saved_tokens_pct": _pct(cur["saved_tokens"], prev["saved_tokens"]),
+        "count_delta": cur["count"] - prev["count"],
+        "count_pct": _pct(cur["count"], prev["count"]),
+        "saved_minutes_delta": cur["saved_minutes"] - prev["saved_minutes"],
+        "saved_minutes_pct": _pct(cur["saved_minutes"], prev["saved_minutes"]),
+        "direction": direction,
+    }
+
+
+# 自动化接入成本启发式（人时/类型）：演示用默认值，后续可由 config.yaml 覆盖。
+ROI_EFFORT_HOURS = 4
+
+
+def compute_roi_targets(by_type, span_days=None):
+    """给每个任务类型算「自动化 ROI 评分」，输出按 ROI 降序的待自动化清单。
+
+    roi_score = 月度节省 Token / 接入成本(人时)
+      - 月度节省 = 累计节省 × (30 / 记录跨度天)，把已有数据外推到一月
+      - 接入成本 = ROI_EFFORT_HOURS（默认 4 人时/类型，演示启发式）
+    纯函数，仅依赖 by_type 聚合值，不读取任何外部配置。
+    """
+    if not by_type:
+        return []
+    sd = span_days if (span_days and span_days > 0) else 30
+    targets = []
+    for d in by_type:
+        cnt = d.get("count", 0) or 0
+        saved = d.get("saved_tokens", 0) or 0
+        avg_base = (d.get("baseline_tokens", 0) or 0) / cnt if cnt else 0
+        monthly_saved = saved * (30.0 / sd)
+        roi = monthly_saved / ROI_EFFORT_HOURS if ROI_EFFORT_HOURS else 0
+        targets.append({
+            "task_type": d["task_type"],
+            "count": cnt,
+            "saved_tokens": saved,
+            "avg_base_tokens": round(avg_base),
+            "monthly_saved_tokens": round(monthly_saved),
+            "effort_hours": ROI_EFFORT_HOURS,
+            "roi_score": round(roi, 1),
+        })
+    targets.sort(key=lambda x: x["roi_score"], reverse=True)
+    return targets
+
+
 def compute_summary(tasks):
     """把 tasks 汇总为结构化摘要（dict）。diagnose() 会包装为 Diagnosis。"""
     total_base_tok = sum(t.get("baseline_tokens", 0) or 0 for t in tasks)
@@ -122,6 +202,18 @@ def compute_summary(tasks):
         by_week.append(w)
     by_week.sort(key=lambda x: x["week"])
 
+    # 记录周期跨度（天）：用于把累计节省外推到「月度」计算 ROI
+    _dates = []
+    for t in tasks:
+        try:
+            _dates.append(datetime.strptime(t["date"], "%Y-%m-%d"))
+        except (ValueError, TypeError, KeyError):
+            pass
+    span_days = (max(_dates) - min(_dates)).days + 1 if len(_dates) >= 2 else 0
+
+    period_compare = compute_period_compare(by_week)
+    roi_targets = compute_roi_targets(by_type, span_days)
+
     return {
         "n": n,
         "total_base_tok": total_base_tok,
@@ -134,6 +226,9 @@ def compute_summary(tasks):
         "time_save_pct": _safe_div(saved_min, total_base_min) * 100,
         "by_type": by_type,
         "by_week": by_week,
+        "span_days": span_days,
+        "period_compare": period_compare,
+        "roi_targets": roi_targets,
         "tasks": tasks,
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
@@ -174,6 +269,16 @@ def build_insights(s):
         recs.append("回顾基线估计是否合理：基线应是「自己手搓 / 反复试错」的真实成本。")
 
     recs.append("保持「本地处理、不上传内容」的合规优势，作为对外可演示的差异化卖点。")
+
+    # v0.8：自动化 ROI 优先序（消费内核已算好的 roi_targets）
+    if s.get("roi_targets"):
+        top_roi = s["roi_targets"][0]
+        recs.append(
+            f"按自动化 ROI 排序，优先做成可复用模板的是「{top_roi['task_type']}」"
+            f"（预估月省 {format_number(top_roi['monthly_saved_tokens'])} Token，"
+            f"接入成本约 {top_roi['effort_hours']} 人时，ROI≈{top_roi['roi_score']}）。"
+        )
+
     return insights, recs
 
 
@@ -252,6 +357,9 @@ class Diagnosis:
     time_save_pct: float = 0.0
     by_type: list = field(default_factory=list)
     by_week: list = field(default_factory=list)
+    span_days: int = 0
+    period_compare: dict = None
+    roi_targets: list = field(default_factory=list)
     insights: list = field(default_factory=list)
     recommendations: list = field(default_factory=list)
     caveats: list = field(default_factory=list)
@@ -294,6 +402,9 @@ def diagnose(tasks):
         time_save_pct=s["time_save_pct"],
         by_type=s["by_type"],
         by_week=s["by_week"],
+        span_days=s["span_days"],
+        period_compare=s["period_compare"],
+        roi_targets=s["roi_targets"],
         insights=insights,
         recommendations=recs,
         caveats=caveats,

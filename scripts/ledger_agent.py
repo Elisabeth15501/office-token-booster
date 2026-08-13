@@ -110,20 +110,19 @@ def propose_entry(diag, task_type, *, date=None, skill_tokens=None, skill_minute
 
 
 def propose_automation_targets(diag, top_n=3):
-    """建议生成：输出下一批「最该自动化」的任务类型（按历史基线从高到低）。
+    """建议生成：输出下一批「最该自动化」的任务类型（按自动化 ROI 降序）。
 
-    直接复用 Diagnosis.by_type，不与 build_insights 的 recommendations 重复造轮子。
+    直接复用 Diagnosis.roi_targets（内核算好的 ROI 评分），不与 build_insights 的
+    recommendations 重复造轮子，也保证报告与 Agent 建议同源。
     """
-    if not diag.by_type:
+    if not diag.roi_targets:
         return ["账本暂无数据，先记录几笔任务再生成自动化建议。"]
-    ranked = sorted(diag.by_type, key=lambda x: x["baseline_tokens"], reverse=True)
     out = []
-    for d in ranked[:top_n]:
-        avg_base = round(d["baseline_tokens"] / d["count"]) if d["count"] else 0
+    for t in diag.roi_targets[:top_n]:
         out.append(
-            f"「{d['task_type']}」：历史 {d['count']} 次，基线均值约 {format_number(avg_base)} "
-            f"Token/次，累计节省 {format_number(d['saved_tokens'])} Token（省 "
-            f"{d['token_save_pct']:.1f}%），优先做成可复用模板。"
+            f"「{t['task_type']}」：历史 {t['count']} 次，累计节省 {format_number(t['saved_tokens'])} Token"
+            f"（ROI≈{t['roi_score']}），预估月省 {format_number(t['monthly_saved_tokens'])} Token，"
+            f"优先做成可复用模板。"
         )
     return out
 

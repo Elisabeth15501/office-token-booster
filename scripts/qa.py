@@ -144,6 +144,21 @@ def answer_followup(diag, question):
                     f"自动化空间最大。")
         return "暂无可分析的任务类型。"
 
+    # 本期 vs 上期（v0.8 提效洞察）
+    if any(k in q for k in ("本期", "上期", "比上周", "相比上周", "和上周比", "这周比", "环比")):
+        pc = diag.period_compare
+        if not pc:
+            return "账本中周数据不足（需要至少两周记录），暂无法做「本期 vs 上期」对比。请继续累积记账。"
+        arrow = {"up": "▲ 上升", "down": "▼ 下降", "flat": "▬ 持平", "new": "✦ 新增"}.get(pc["direction"], "")
+        pct = "—" if pc["saved_tokens_pct"] is None else f"{pc['saved_tokens_pct']:+.1f}%"
+        cur, prev = pc["current"], pc["previous"]
+        return (
+            f"本期（{pc['current_week']}）对比上期（{pc['previous_week']}）：\n"
+            f"- 节省 Token：{format_number(cur['saved_tokens'])}（{arrow}，{pct}）；上期 {format_number(prev['saved_tokens'])}\n"
+            f"- 任务数：{cur['count']} 次（上期 {prev['count']} 次）\n"
+            f"- 节省时间：{format_number(cur['saved_minutes'])} 分（上期 {format_number(prev['saved_minutes'])} 分）"
+        )
+
     # 按周趋势
     if any(k in q for k in ("周", "趋势", "变化", "每周", "时间线", "走势")):
         if not diag.by_week:
