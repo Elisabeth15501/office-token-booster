@@ -174,6 +174,78 @@ def append_entry(ledger_path, entry, *, backup=True, dry_run=False):
     return ledger, backup_path
 
 
+def append_entries(ledger_path, entries, *, backup=True, dry_run=False):
+    """把多条 entry 一次性追加进 ledger 的 tasks 数组（append_entry 的批量版）。
+
+    与 append_entry 同语义：dry_run 只返回新 ledger dict；否则先备份再原子写入。
+    返回 (new_ledger_dict, backup_path_or_None)。
+    """
+    p = Path(ledger_path)
+    if p.is_file():
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                ledger = json.load(f)
+        except (json.JSONDecodeError, ValueError):
+            ledger = {"tasks": []}
+        if not isinstance(ledger, dict):
+            ledger = {"tasks": []}
+    else:
+        ledger = {"tasks": []}
+
+    tasks = ledger.get("tasks", [])
+    if not isinstance(tasks, list):
+        tasks = []
+    tasks.extend(entries)
+    ledger["tasks"] = tasks
+
+    if dry_run:
+        return ledger, None
+
+    backup_path = None
+    if backup and p.is_file():
+        ts = datetime.now().strftime("%Y%m%dT%H%M%S%f")
+        backup_path = Path(str(p) + f".{ts}.bak")
+        backup_path.write_text(p.read_text(encoding="utf-8"), encoding="utf-8")
+
+    tmp = Path(str(p) + ".tmp")
+    tmp.write_text(json.dumps(ledger, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, p)
+    return ledger, backup_path
+
+
+def import_host_usage(ledger_path, days=7, provider=None, *,
+                      baseline_tokens=0, baseline_minutes=0, apply=False):
+    """v0.9：把宿主真实用量导入为提效账本草稿（skill 取实测值，baseline 默认 0 待补）。
+
+    默认 dry-run（只返回草稿与预览诊断，不碰磁盘）；apply=True 才批量写回。
+    返回 dict：{entries, count, applied, backup_path, new_diag, note}。
+    """
+    from host_cost import get_default_provider, draft_entries_from_host
+
+    provider = provider or get_default_provider()
+    if provider is None:
+        return {"entries": [], "count": 0, "applied": False, "backup_path": None,
+                "new_diag": None, "note": "未检测到本机宿主用量数据，跳过导入。"}
+
+    entries = draft_entries_from_host(
+        provider, days, baseline_tokens=baseline_tokens, baseline_minutes=baseline_minutes)
+    if not entries:
+        return {"entries": [], "count": 0, "applied": False, "backup_path": None,
+                "new_diag": None, "note": f"最近 {days} 天无可用宿主用量记录。"}
+
+    if not apply:
+        new_diag = diagnose(entries)
+        return {"entries": entries, "count": len(entries), "applied": False,
+                "backup_path": None, "new_diag": new_diag, "note": "dry-run 预览，未写盘。"}
+
+    new_ledger, bak = append_entries(
+        ledger_path, entries, backup=True, dry_run=False)
+    new_diag = diagnose(new_ledger["tasks"])
+    return {"entries": entries, "count": len(entries), "applied": True,
+            "backup_path": bak, "new_diag": new_diag,
+            "note": f"已写回 {len(entries)} 条（备份：{bak}）。"}
+
+
 # ─────────────────────────────────────────────────────────────
 # 长链路编排
 # ─────────────────────────────────────────────────────────────
@@ -222,6 +294,10 @@ def main():
                         help="真正写回账本（默认仅预览，不改动文件）")
     parser.add_argument("--targets", action="store_true",
                         help="改为输出「待自动化类型建议」而不写回")
+    parser.add_argument("--import-host", action="store_true",
+                        help="v0.9：把本机 WorkBuddy 真实用量导成账本草稿（dry-run 预览；加 --apply 写回）")
+    parser.add_argument("--days", type=int, default=7,
+                        help="--import-host 的时间窗（最近 N 天，默认 7）")
     args = parser.parse_args()
 
     if not args.ledger:
@@ -236,6 +312,24 @@ def main():
         return 2
 
     diag = diagnose(tasks)
+
+    if args.import_host:
+        res = import_host_usage(args.ledger, days=args.days, apply=args.apply)
+        print("=== v0.9 真实宿主用量导入 ===")
+        print(res["note"])
+        if res["entries"]:
+            print(f"草稿条目（{res['count']} 条，skill 取宿主实测，baseline 默认 0 待补）：")
+            for e in res["entries"][:20]:
+                print("  - " + json.dumps(e, ensure_ascii=False))
+            if res["new_diag"]:
+                print(f"预览节省 Token：{format_number(res['new_diag'].saved_tok)}"
+                      f"（率 {res['new_diag'].token_save_pct:.1f}%，baseline 仍为 0 时仅为占位）")
+        if res["applied"]:
+            print(f"[OK] 已写回 {res['ledger_path'] if 'ledger_path' in res else args.ledger}"
+                  f"（备份：{res['backup_path']}）")
+        else:
+            print("（未加 --apply，仅预览。加上 --apply 才会真正写入账本。）")
+        return 0
 
     if args.targets:
         print("待自动化类型建议（按历史基线从高到低）：")

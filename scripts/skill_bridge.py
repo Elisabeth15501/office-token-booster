@@ -148,7 +148,7 @@ class TriggerResult:
 # 主入口：处理一个对话事件
 # ─────────────────────────────────────────────────────────────
 
-def on_conversation_event(ledger_path, event, state):
+def on_conversation_event(ledger_path, event, state, cost_provider=None):
     """处理一个宿主对话事件，必要时自动建议记账。
 
     参数
@@ -161,6 +161,9 @@ def on_conversation_event(ledger_path, event, state):
                     - "completed"（bool，宿主显式声明「任务已完成」的结构化事件，
                              优先级高于文本里的完成动词）
     state       : 调用方维护的 dict（与 handle 共用，含可选 "pending"）
+    cost_provider : 可选 HostCostProvider（v0.9）。当 event 未带 cost 时，
+                    用宿主真实用量补全（仅作兜底，不覆盖宿主显式回报的实测值）。
+                    不传则保持 v0.7 行为，零改动。
 
     返回
     ----
@@ -178,6 +181,18 @@ def on_conversation_event(ledger_path, event, state):
     ev_cost = (event or {}).get("cost") or {}
     ev_tokens = _coerce_int(ev_cost.get("skill_tokens"))
     ev_minutes = _coerce_int(ev_cost.get("skill_minutes"))
+
+    # v0.9：事件未带 cost 但提供了 cost_provider → 用宿主真实用量兜底补全。
+    # 仅当事件自身没有成本数字时才回退，绝不覆盖宿主显式回报的实测值。
+    if (ev_tokens is None and ev_minutes is None) and cost_provider is not None:
+        try:
+            _recent = cost_provider.fetch_recent(1)
+        except Exception:
+            _recent = []
+        if _recent:
+            _rec = _recent[0]
+            ev_tokens = _rec.skill_tokens or None
+            ev_minutes = _rec.skill_minutes or None
 
     sig = is_completion_event(text)
     # 宿主可显式声明已完成（结构化事件），优先级高于文本动词

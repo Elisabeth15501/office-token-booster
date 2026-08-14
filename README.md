@@ -67,7 +67,7 @@ office-token-booster/
 
 ## 测试（pytest + Allure）
 
-测试套件覆盖 v0.5–v0.8 的核心能力，并强制守卫「确认消息 / 摘要报告 / 内核 Diagnosis 三层数字同源（误差 < 0.05pp）」与「触发默认 dry-run 不改账本」等不变量；另含 **17 个负向/边界测试**（`test_boundary.py`）专门验证极端输入、畸形数据与空值下的优雅降级。共 **44 个用例**（v0.5×3 + v0.6×7 + v0.7×7 + 渲染器×2 + 边界×17 + v0.8×8），全绿。三层一致测试改为**直接比对内核重算值**（不再靠正则抓文案），文案改动不会让测试误伤。
+测试套件覆盖 v0.5–v0.9 的核心能力，并强制守卫「确认消息 / 摘要报告 / 内核 Diagnosis 三层数字同源（误差 < 0.05pp）」与「触发默认 dry-run 不改账本」等不变量；另含 **17 个负向/边界测试**（`test_boundary.py`）专门验证极端输入、畸形数据与空值下的优雅降级。共 **57 个用例**（v0.5×3 + v0.6×7 + v0.7×7 + 渲染器×2 + 边界×17 + v0.8×8 + v0.9×13），全绿。三层一致测试改为**直接比对内核重算值**（不再靠正则抓文案），文案改动不会让测试误伤。
 
 每个用例在报告里额外携带：
 
@@ -107,6 +107,7 @@ python -m pytest tests/ -v --alluredir=allure-results
 | v0.7 | `test_v07.py` | 真实用量 `cost_source=event`、文本成本回退 `text`、写回条目采用宿主实测、三层一致、源码去品牌化（防回归） |
 | 边界/负向 | `test_boundary.py` | 跨模块极端输入与畸形数据：空/None/负数/超大数/损坏 JSON/零基线/空账本等，验证「优雅降级不崩溃」；全维度打标（layer/test_type/component/risk_area/priority/suite） |
 | v0.8 | `test_v08.py` | 提效洞察可视化：趋势折线图（`build_trend_line_chart`）、本期 vs 上期周期对比（`compute_period_compare` / qa「比上周」意图）、按 ROI 排序的自动化优先级（`compute_roi_targets` / `ledger_agent.propose_automation_targets`）；单周数据降级为「周数据不足」友好提示；全维度打标 |
+| v0.9 | `test_v09_host_cost.py` ×9 + `test_v09_skillmd.py` ×4 | 真实宿主用量接入：`host_cost` 只读本机 WorkBuddy traces/db/usage-log（含 `EventCostProvider` / `WorkBuddyLocalProvider` / `draft_entries_from_host`，容忍脏数据·超窗·无数据降级不崩）；触发流 `cost_provider` 补全实测成本且向后兼容 `None`；`ledger_agent.import_host_usage` dry-run 不写盘；SKILL.md 定位 Option C 一致性（禁止未实现执行器承诺、含 QUICKSTART 与「可选只读本机宿主用量」声明）；全维度打标 |
 
 > 每个用例都通过 `allure.feature/story/severity/description/step/attach` 在报告里给出可读的「做了什么、看到了什么」，方便非技术评审直接看懂。
 
@@ -179,4 +180,5 @@ ci: 新增 pytest + allure 自动渲染工作流
 - v0.6（已完成）：Skill 触发流 —— 新增 `scripts/skill_bridge.py` 与 `tests/test_v06.py`；`on_conversation_event(event)` 把**宿主对话事件**翻译成 `conversation.handle()` 调用，用 `is_completion_event` 识别「任务完成」信号（高/中/低信心），自动建议记账并暂存待确认条目；`_lenient_type` 用类型字典做大小写不敏感兜底识别；触发默认 dry-run 不写账本，用户「确认」才写回；内核与三层外壳 + 编排层零改动
 - v0.7（已完成）：真实闭环 + 去品牌化 —— 升级 `scripts/skill_bridge.py` + 新增 `scripts/host_hook.py` 与 `tests/test_v07.py`；`on_conversation_event` 现可消费宿主回报的真实用量 `event["cost"]`（实测优先级高于文本解析，`cost_source="event"`）与结构化完成标志 `event["completed"]`，把"提效"从"用户自报"升级为"实测成本"；`host_hook.py` 是平台无关的宿主钩子示例（不 import 任何平台 SDK、无网络、无硬编码密钥，满足 OpenClaw/天禧 安全红线）；`skill_bridge` 去品牌化为通用「宿主对话事件」，可同时服务 WorkBuddy / 天禧 / OpenClaw，比赛仓库可直接复用内核；内核与三层外壳 + 编排层仍零改动
 - v0.8（已完成）：提效洞察可视化 —— `diagnose` 内核新增 `compute_period_compare`（本期 vs 上期，含方向/环比百分比，单周数据返回 None 并触发友好降级）与 `compute_roi_targets`（按「月度节省 ÷ 投入工时」排自动化 ROI）；`report_engine` 新增零依赖内联 SVG **趋势折线图**（`build_trend_line_chart`）、**本期 vs 上期**对比卡（`build_compare_card`）、**最该自动化（按 ROI 排序 Top N）**卡（`build_roi_card`），注入完整报告与摘要双模板；`qa` 新增「比上周/环比」意图分支（数据不足给出「周数据不足」提示）；`ledger_agent.propose_automation_targets` 改为消费内核 ROI 排序结果。新增 `tests/test_v08.py`（8 例，全维度打标）；用例总数 36 → 44。内核与三层外壳 + 编排层仍零改动
+- v0.9（已完成）：诚实定位 + 真实宿主用量接入 —— SKILL.md 定位收敛为 Option C「办公室 Token 洞察与提效助手」：明确「只度量、不执行」，新增 QUICKSTART 与「可选只读本机宿主用量」Non-goals 声明（不联网、无密钥，满足安全红线）；新增 `scripts/host_cost.py`（隔离层，`CostRecord` / `EventCostProvider` / `WorkBuddyLocalProvider` / `draft_entries_from_host`，纯标准库、无网络、无密钥、脏数据降级不崩），把 `skill_tokens` 从「用户自报」升级为「宿主实测」；`skill_bridge.on_conversation_event` 新增 `cost_provider` 参数（事件无 cost 时用宿主实测补全并标注来源，向后兼容 `None`）；`ledger_agent` 新增 `import_host_usage`（默认 dry-run 不写盘）。新增 `tests/test_v09_host_cost.py`（9 例）+ `tests/test_v09_skillmd.py`（4 例），守卫「诚实定位不回潮」；用例总数 44 → 57。内核与三层外壳 + 编排层仍零改动
 - 目标：提交「天禧 AI Skills 苍穹共创计划」（截止 2026-12-31）

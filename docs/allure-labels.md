@@ -61,7 +61,9 @@ def test_parse_number_empty_string(): ...
 | `skill_bridge` | `scripts/skill_bridge.py`（含 `on_conversation_event`、`is_completion_event`） |
 | `host_hook` | `scripts/host_hook.py`（含 `build_completion_event`、`on_task_completed`） |
 | `report_engine` | `scripts/report_engine.py`（含 `generate_html_report`、`generate_markdown_summary`） |
-| `ledger_agent` | `scripts/ledger_agent.py`（含 `propose_entry`、`append_entry`、`run_long_chain`） |
+| `ledger_agent` | `scripts/ledger_agent.py`（含 `propose_entry`、`append_entry`、`run_long_chain`、`import_host_usage`） |
+| `host_cost` | `scripts/host_cost.py`（含 `CostRecord`、`EventCostProvider`、`WorkBuddyLocalProvider`、`draft_entries_from_host`） |
+| `documentation` | `SKILL.md` / `README.md` 等文档的定位与一致性校验 |
 | `renderer` | `tools/render_allure_html.py`（含 `load_results`、`render`、`main`） |
 
 **用法示例：**
@@ -122,6 +124,7 @@ def test_confirm_writeback(): ...
 | `v0.5` | 对话编排 + 类型字典消歧 |
 | `v0.6` | Skill 触发流 + 被动完成信号 |
 | `v0.7` | 真实闭环 + 去品牌化 |
+| `v0.9` | 真实宿主用量接入（host_cost）+ 定位 Option C（洞察）+ QUICKSTART |
 | `renderer` | 报告渲染器 |
 | `boundary` | 跨版本边界/负向测试 |
 
@@ -165,6 +168,8 @@ def test_v07_cost_source_mixed(ledger): ...
 | `test_renderer.py` | 2 | feature, title（renderer 不依赖 allure-pytest 时退化）；fixture 含自定义维度徽章断言 |
 | `test_boundary.py` | 17 | 全维度覆盖（layer / test_type / component / risk_area / priority / suite / epic / src_link / feature / story / severity / title / description） |
 | `test_v08.py` | 8 | epic, layer, src_link, feature, story, severity, title, description；全维度（test_type / component / risk_area / priority / suite），覆盖内核层（diagnose）与渲染层（report_engine） |
+| `test_v09_host_cost.py` | 9 | 全维度（layer / test_type / component / risk_area / priority / suite），覆盖宿主适配层（host_cost）/ 触发层（skill_bridge）/ 写回层（ledger_agent） |
+| `test_v09_skillmd.py` | 4 | 全维度，覆盖 documentation（SKILL.md 定位一致性 / QUICKSTART / 可选宿主接入声明） |
 
 ---
 
