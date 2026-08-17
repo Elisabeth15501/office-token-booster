@@ -214,10 +214,12 @@ def append_entries(ledger_path, entries, *, backup=True, dry_run=False):
 
 
 def import_host_usage(ledger_path, days=7, provider=None, *,
-                      baseline_tokens=0, baseline_minutes=0, apply=False):
+                      baseline_tokens=0, baseline_minutes=0, apply=False,
+                      baseline_ratio=None):
     """v0.9：把宿主真实用量导入为提效账本草稿（skill 取实测值，baseline 默认 0 待补）。
 
     默认 dry-run（只返回草稿与预览诊断，不碰磁盘）；apply=True 才批量写回。
+    baseline_ratio：按 skill_tokens*ratio 估算 baseline（假设性，非实测），便于先看提效报告。
     返回 dict：{entries, count, applied, backup_path, new_diag, note}。
     """
     from host_cost import get_default_provider, draft_entries_from_host
@@ -228,7 +230,8 @@ def import_host_usage(ledger_path, days=7, provider=None, *,
                 "new_diag": None, "note": "未检测到本机宿主用量数据，跳过导入。"}
 
     entries = draft_entries_from_host(
-        provider, days, baseline_tokens=baseline_tokens, baseline_minutes=baseline_minutes)
+        provider, days, baseline_tokens=baseline_tokens, baseline_minutes=baseline_minutes,
+        baseline_ratio=baseline_ratio)
     if not entries:
         return {"entries": [], "count": 0, "applied": False, "backup_path": None,
                 "new_diag": None, "note": f"最近 {days} 天无可用宿主用量记录。"}
@@ -238,12 +241,20 @@ def import_host_usage(ledger_path, days=7, provider=None, *,
         return {"entries": entries, "count": len(entries), "applied": False,
                 "backup_path": None, "new_diag": new_diag, "note": "dry-run 预览，未写盘。"}
 
+    # 写回前按 session_id 去重：宿主重复导入不会把同一会话追加成多条（修复真实缺口）
+    existing_tasks = load_ledger(ledger_path)
+    seen_ids = {t.get("session_id") for t in existing_tasks if t.get("session_id")}
+    new_entries = [e for e in entries
+                   if not (e.get("session_id") and e["session_id"] in seen_ids)]
+    skipped = len(entries) - len(new_entries)
+
     new_ledger, bak = append_entries(
-        ledger_path, entries, backup=True, dry_run=False)
+        ledger_path, new_entries, backup=True, dry_run=False)
     new_diag = diagnose(new_ledger["tasks"])
-    return {"entries": entries, "count": len(entries), "applied": True,
+    return {"entries": new_entries, "count": len(new_entries),
+            "skipped_duplicates": skipped, "applied": True,
             "backup_path": bak, "new_diag": new_diag,
-            "note": f"已写回 {len(entries)} 条（备份：{bak}）。"}
+            "note": f"已写回 {len(new_entries)} 条（跳过重复 {skipped} 条；备份：{bak}）。"}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -298,6 +309,8 @@ def main():
                         help="v0.9：把本机 WorkBuddy 真实用量导成账本草稿（dry-run 预览；加 --apply 写回）")
     parser.add_argument("--days", type=int, default=7,
                         help="--import-host 的时间窗（最近 N 天，默认 7）")
+    parser.add_argument("--baseline-ratio", type=float, default=None,
+                        help="v0.9：宿主导入时按 skill_tokens*ratio 估算 baseline（假设性，非实测扣费）")
     args = parser.parse_args()
 
     if not args.ledger:
@@ -314,19 +327,31 @@ def main():
     diag = diagnose(tasks)
 
     if args.import_host:
-        res = import_host_usage(args.ledger, days=args.days, apply=args.apply)
+        res = import_host_usage(args.ledger, days=args.days, apply=args.apply,
+                                baseline_ratio=args.baseline_ratio)
         print("=== v0.9 真实宿主用量导入 ===")
         print(res["note"])
+        if args.baseline_ratio:
+            print(f"[提示] 使用 --baseline-ratio {args.baseline_ratio}：baseline 按实测*"
+                  f"{args.baseline_ratio} 估算（假设性，非实测扣费）。")
         if res["entries"]:
-            print(f"草稿条目（{res['count']} 条，skill 取宿主实测，baseline 默认 0 待补）：")
+            print(f"草稿条目（{res['count']} 条，skill 取宿主实测，baseline "
+                  f"{'按 ratio 估算' if args.baseline_ratio else '默认 0 待补'}）：")
             for e in res["entries"][:20]:
                 print("  - " + json.dumps(e, ensure_ascii=False))
             if res["new_diag"]:
-                print(f"预览节省 Token：{format_number(res['new_diag'].saved_tok)}"
-                      f"（率 {res['new_diag'].token_save_pct:.1f}%，baseline 仍为 0 时仅为占位）")
+                if args.baseline_ratio:
+                    print(f"估算节省 Token：{format_number(res['new_diag'].saved_tok)}"
+                          f"（率 {res['new_diag'].token_save_pct:.1f}%，baseline 按 ratio"
+                          f"={args.baseline_ratio} 假设估算，非实测扣费）")
+                else:
+                    print(f"预览节省 Token：{format_number(res['new_diag'].saved_tok)}"
+                          f"（率 {res['new_diag'].token_save_pct:.1f}%，baseline 为 0 时仅为占位）")
         if res["applied"]:
+            _skipped = res.get("skipped_duplicates", 0)
+            _skip_note = f"，跳过重复 {_skipped} 条" if _skipped else ""
             print(f"[OK] 已写回 {res['ledger_path'] if 'ledger_path' in res else args.ledger}"
-                  f"（备份：{res['backup_path']}）")
+                  f"（备份：{res['backup_path']}{_skip_note}）")
         else:
             print("（未加 --apply，仅预览。加上 --apply 才会真正写入账本。）")
         return 0

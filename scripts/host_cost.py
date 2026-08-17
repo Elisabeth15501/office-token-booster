@@ -58,6 +58,8 @@ class CostRecord:
         return {
             "date": self.date,
             "type": self.task_type or "AI办公任务",
+            "model": self.model,
+            "session_id": self.session_id,
             "baseline_tokens": int(baseline_tokens),
             "skill_tokens": int(self.skill_tokens),
             "baseline_minutes": int(baseline_minutes),
@@ -135,37 +137,59 @@ _USAGE_LOG = _WORKBUDDY_ROOT / "usage-log.json"
 
 
 def _extract_tokens(obj: dict) -> tuple[int, int]:
-    """从一条 trace / usage 记录里容忍地抽取 (skill_tokens, skill_minutes)。
+    """从一条 trace 记录里容忍地抽取 (skill_tokens, skill_minutes)。
 
+    调用方应先把嵌套结构（如 {"trace": {...}}）解成 trace 级 dict 再传入。
     不同 WorkBuddy 版本的字段名可能漂移，这里多键兜底的「防屎山」写法：
     解析不到就返回 (0, 0)，绝不让单条脏数据炸掉整体。
+    额外兜底：trace 级 `duration`（毫秒）折算成 skill_minutes，补全耗时维度。
     """
     if not isinstance(obj, dict):
         return 0, 0
-    tok_keys = ("effective_tokens", "effectiveTokens", "total_tokens", "totalTokens",
-                "skill_tokens", "token_usage", "tokens")
-    min_keys = ("effective_minutes", "skill_minutes", "minutes", "duration_min")
+    # ── token：标量键（含字典值里的 total / prompt+completion）──
     tok = 0
-    for k in tok_keys:
+    scalar_keys = ("effective_tokens", "effectiveTokens", "total_tokens", "totalTokens",
+                   "skill_tokens", "tokens")
+    for k in scalar_keys:
         v = obj.get(k)
         if isinstance(v, dict):
-            tok = _coerce_int(v.get("total")) or _coerce_int(v.get("totalTokens"))
+            tok = (_coerce_int(v.get("total")) or _coerce_int(v.get("totalTokens"))
+                   or _coerce_int(v.get("total_tokens")))
+            if tok == 0:
+                tok = _coerce_int(v.get("prompt_tokens")) + _coerce_int(v.get("completion_tokens"))
             if tok:
                 break
         elif _coerce_int(v):
             tok = _coerce_int(v)
             break
+    # 顶层 usage / token_usage 嵌套（OpenAI、Claude、多数 LLM API 通用）
+    if tok == 0:
+        for nk in ("usage", "token_usage", "tokenUsage"):
+            u = obj.get(nk)
+            if isinstance(u, dict):
+                tok = _coerce_int(u.get("total_tokens")) or _coerce_int(u.get("total"))
+                if tok == 0:
+                    tok = _coerce_int(u.get("prompt_tokens")) + _coerce_int(u.get("completion_tokens"))
+                if tok:
+                    break
+    min_keys = ("effective_minutes", "skill_minutes", "minutes", "duration_min")
     mins = 0
     for k in min_keys:
         v = obj.get(k)
         if _coerce_int(v):
             mins = _coerce_int(v)
             break
+    # duration(ms) → 分钟 兜底（真实 WorkBuddy trace 常见 duration 字段）
+    if mins == 0:
+        d = obj.get("duration")
+        if isinstance(d, (int, float)) and d > 0:
+            mins = max(1, round(d / 60000))
     return tok, mins
 
 
 def _extract_date(obj: dict) -> str:
-    for k in ("date", "day", "timestamp", "created_at", "time"):
+    # 兼容真实 WorkBuddy 的 ISO 时间戳 startedAt/endedAt，以及测试用的 date/day 等
+    for k in ("date", "day", "timestamp", "created_at", "time", "startedAt", "endedAt"):
         v = obj.get(k)
         if isinstance(v, str) and len(v) >= 10:
             return v[:10]
@@ -211,33 +235,109 @@ class WorkBuddyLocalProvider:
     def fetch_recent(self, days: int = 7) -> list[CostRecord]:
         records: list[CostRecord] = []
         traces_dir = self.root / "traces"
-        if traces_dir.is_dir():
-            for p in sorted(traces_dir.glob("*")):
-                if not p.is_file():
-                    continue
-                if p.suffix.lower() not in ("", ".json", ".jsonl", ".log"):
+        if not traces_dir.is_dir():
+            return []
+        # 真实 WorkBuddy 把 trace 存在 traces/<session_id>/trace_<hash>.json（嵌套子目录），
+        # 故用 rglob 递归；同时兼容测试用的扁平 traces/<file>.json。
+        for p in sorted(traces_dir.rglob("*")):
+            if not p.is_file():
+                continue
+            if p.suffix.lower() not in ("", ".json", ".jsonl", ".log"):
+                continue
+            try:
+                obj = _read_trace_file(p)
+            except Exception:
+                continue
+            if not isinstance(obj, dict):
+                continue
+            # 真实 trace 结构是 {"trace": {...}, "spans": [...]}；测试用扁平文件则 trace 字段缺失。
+            tr = obj.get("trace") if isinstance(obj.get("trace"), dict) else obj
+            tok, mins = _extract_tokens(tr)
+            if tok == 0:          # 0 token 的空/异常会话不计入消耗
+                continue
+            _models = (tr.get("modelInfo") or {}).get("models") or []
+            model = _models[0] if _models else (tr.get("model") or "")
+            rec = CostRecord(
+                date=_extract_date(tr),
+                skill_tokens=tok,
+                skill_minutes=mins,
+                model=str(model),
+                task_type=tr.get("task_type") or tr.get("type"),
+                session_id=str(tr.get("session_id") or tr.get("sessionId")
+                               or obj.get("session_id") or ""),
+                source="workbuddy_traces",
+            )
+            if _within_days(rec.date, days):
+                records.append(rec)
+        return records
+
+
+class GenericJsonProvider:
+    """宿主无关的用量提供方：读取任意主机导出的「用量 JSON / JSONL」文件。
+
+    用途：尚未有专属 Provider 的 Agent 平台（例如尚未发布的天禧 AI 等开发者社区
+    写的 Skill 宿主）只要能把每次会话的 token / 耗时以 JSON 形式导出，本 provider
+    即可用容忍抽取器（_extract_tokens / _extract_date）解析，无需改 skill 内核。
+
+    支持的形态：
+      - 整文件 JSON：一个对象，或对象数组（每个元素代表一次会话）
+      - JSONL：每行一个对象
+      - 字段名漂移由 _extract_tokens / _extract_date 兜底（OpenAI/Claude 的
+        usage.{prompt_tokens,completion_tokens,total_tokens} 等均可识别）
+    红线：只读、纯解析，异常降级为跳过/空列表，绝不抛异常炸掉调用方。
+    """
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+
+    def fetch_recent(self, days: int = 7) -> list[CostRecord]:
+        if not self.path.is_file():
+            return []
+        try:
+            text = self.path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return []
+        if not text.strip():
+            return []
+        objs: list[dict] = []
+        # 1) 整文件 JSON（对象 或 对象数组）
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                objs = [o for o in parsed if isinstance(o, dict)]
+            elif isinstance(parsed, dict):
+                objs = [parsed]
+        except json.JSONDecodeError:
+            # 2) JSONL：逐行取首个可解析对象
+            for line in text.splitlines():
+                line = line.strip()
+                if not line:
                     continue
                 try:
-                    obj = _read_trace_file(p)
-                except Exception:
+                    o = json.loads(line)
+                    if isinstance(o, dict):
+                        objs.append(o)
+                except json.JSONDecodeError:
                     continue
-                if not obj:
-                    continue
-                tok, mins = _extract_tokens(obj)
-                if tok == 0 and mins == 0:
-                    continue
-                rec = CostRecord(
-                    date=_extract_date(obj),
-                    skill_tokens=tok,
-                    skill_minutes=mins,
-                    model=str(obj.get("model") or obj.get("modelInfo") or ""),
-                    task_type=obj.get("task_type") or obj.get("type"),
-                    session_id=str(obj.get("session_id") or obj.get("sessionId") or ""),
-                    source="workbuddy_traces",
-                )
-                if _within_days(rec.date, days):
-                    records.append(rec)
-        return records
+        records: list[CostRecord] = []
+        for o in objs:
+            tr = o.get("trace") if isinstance(o.get("trace"), dict) else o
+            tok, mins = _extract_tokens(tr)
+            if tok == 0:
+                continue
+            _models = (tr.get("modelInfo") or {}).get("models") or []
+            model = _models[0] if _models else (tr.get("model") or "")
+            records.append(CostRecord(
+                date=_extract_date(tr),
+                skill_tokens=tok,
+                skill_minutes=mins,
+                model=str(model),
+                task_type=tr.get("task_type") or tr.get("type") or o.get("type"),
+                session_id=str(tr.get("sessionId") or tr.get("session_id")
+                               or o.get("session_id") or ""),
+                source="generic_json",
+            ))
+        return [r for r in records if _within_days(r.date, days)]
 
 
 def get_default_provider() -> Optional[HostCostProvider]:
@@ -253,16 +353,25 @@ def get_default_provider() -> Optional[HostCostProvider]:
 
 def draft_entries_from_host(provider: HostCostProvider, days: int = 7, *,
                             baseline_tokens: int = 0,
-                            baseline_minutes: int = 0) -> list[dict]:
-    """用宿主真实用量生成账本草稿列表（skill 取实测值，baseline 默认 0 待补）。
+                            baseline_minutes: int = 0,
+                            baseline_ratio: float = None) -> list[dict]:
+    """用宿主真实用量生成账本草稿列表（skill 取实测值）。
 
-    返回标准账本 entry dict 列表；调用方（ledger_agent / 对话流）应让用户确认后再写回，
-    本函数绝不碰磁盘。
+    baseline 代表「笨办法手搓成本」，平台无从获得，默认 0 待补。
+    若给出 baseline_ratio（如 3.0 表示手搓成本约为实测的 3 倍），则按
+    skill_tokens * ratio 估算 baseline，便于先看到一份「假设性」提效报告；
+    ratio 仅为用户主观假设，非实测扣费。
     """
     recs = provider.fetch_recent(days)
-    return [r.to_ledger_entry(baseline_tokens=baseline_tokens,
-                              baseline_minutes=baseline_minutes)
-            for r in recs]
+    entries = []
+    for r in recs:
+        bt = baseline_tokens
+        bm = baseline_minutes
+        if baseline_ratio:
+            bt = round(r.skill_tokens * baseline_ratio) if r.skill_tokens else bt
+            bm = round(r.skill_minutes * baseline_ratio) if r.skill_minutes else bm
+        entries.append(r.to_ledger_entry(baseline_tokens=bt, baseline_minutes=bm))
+    return entries
 
 
 def main():
