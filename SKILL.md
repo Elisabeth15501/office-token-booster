@@ -15,14 +15,43 @@ categories:
   - 数据分析
   - 效率工具
 triggers:
-  - 办公提效复盘
-  - Token 节省报告
-  - 哪些任务最该自动化
-  - 提效趋势
-  - 本周比上周
-  - AI 用量复盘
-  - 周度提效汇总
-  - 导入宿主真实用量
+  - intent: usage_overview
+    description: 查看本机 AI 办公的真实 Token / 耗时用量（只读本地 traces，零上传）
+    examples:
+      - "我最近 7 天用了多少 Token？"
+      - "帮我看看这周 AI 办公消耗了多少"
+      - "我的 WorkBuddy 用了多少 Token？"
+      - "统计一下我这个月的 AI 用量"
+  - intent: efficiency_review
+    description: 基于账本 baseline 度量「用 AI 办公省了多少 Token / 时间」
+    examples:
+      - "生成我的提效报告"
+      - "用 AI 办公帮我省了多少？"
+      - "我这个月提效怎么样？"
+      - "做个周度提效汇总"
+  - intent: task_diagnosis
+    description: 追问哪个任务最费 / 最省 Token、最该自动化
+    examples:
+      - "哪个任务类型最费 Token？"
+      - "哪个任务最省时间？"
+      - "哪种办公任务最该自动化？"
+      - "什么任务 AI 帮我最多？"
+  - intent: report_visualization
+    description: 生成 Token 用量 / 提效的可视化报告（HTML / 图表）
+    examples:
+      - "生成一份 Token 用量报告"
+      - "把我的 AI 用量做成图表"
+      - "给我出个提效 HTML 报告"
+  - intent: import_bookkeeping
+    description: 导入宿主真实用量或自然语言记账
+    examples:
+      - "把本机 WorkBuddy 最近 7 天用量导入账本"
+      - "记一笔 周报生成 花了 1800 token"
+      - "我刚写完周报，用 AI 花了 1800 token"
+non_triggers:
+  - "帮我写一份周报"
+  - "整理一下会议纪要"
+  - "分析这张 Excel 算个指标"
 tools:
   - filesystem
   - shell
