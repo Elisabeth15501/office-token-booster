@@ -62,7 +62,7 @@ def test_parse_number_empty_string(): ...
 | `host_hook` | `scripts/host_hook.py`（含 `build_completion_event`、`on_task_completed`） |
 | `report_engine` | `scripts/report_engine.py`（含 `generate_html_report`、`generate_markdown_summary`） |
 | `ledger_agent` | `scripts/ledger_agent.py`（含 `propose_entry`、`append_entry`、`run_long_chain`、`import_host_usage`） |
-| `host_cost` | `scripts/host_cost.py`（含 `CostRecord`、`EventCostProvider`、`WorkBuddyLocalProvider`、`draft_entries_from_host`） |
+| `host_cost` | `scripts/host_cost.py`（含 `CostRecord`、`EventCostProvider`、`LocalProvider`、`draft_entries_from_host`） |
 | `documentation` | `SKILL.md` / `README.md` 等文档的定位与一致性校验 |
 | `renderer` | `tools/render_allure_html.py`（含 `load_results`、`render`、`main`） |
 

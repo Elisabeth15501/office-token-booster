@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """host_hook.py — office-token-booster v0.7 宿主钩子示例（平台无关）
 
-演示宿主对话平台（WorkBuddy / 天禧 / OpenClaw）如何把「任务完成」事件接进
+演示宿主对话平台（天禧 / OpenClaw）如何把「任务完成」事件接进
 skill_bridge.on_conversation_event，让提效记账形成**真实闭环**：
 
 - 宿主在完成一次办公任务后，把真实用量（token / 分钟）随事件一起传来；

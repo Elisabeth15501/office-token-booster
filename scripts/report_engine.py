@@ -29,8 +29,8 @@ Token 与耗时，生成 Markdown / HTML / JSON 报告。
 # ---------------------------------------------------------------------------
 # FORK NOTE (office-token-booster / B 线):
 # 本文件从 agent-analytics-report/scripts/generate_report.py fork 而来（ADR-7 双产品线独立）。
-# 已剥离 WorkBuddy 数据源耦合：移除 collect_usage_data 运行时导入与 main() 实时采集分支，
-# 中性化 pricing.json 引用（ADR-9：B 线默认走「用户上传/导出数据」模式，不依赖天禧/WorkBuddy 用量 API）。
+# 已剥离宿主数据源耦合：移除 collect_usage_data 运行时导入与 main() 实时采集分支，
+# 中性化 pricing.json 引用（ADR-9：B 线默认走「用户上传/导出数据」模式，不依赖天禧/宿主 用量 API）。
 # 下方报告函数已适配 office ledger 数据（消费 token/耗时/任务类型），作为 B 线唯一报告生成器。
 # 通用渲染原语（format_number / _pad_label / build_donut_chart 等）沿用 A 引擎。
 # ---------------------------------------------------------------------------
@@ -656,7 +656,7 @@ def main():
             args.data_file = str(_default_ledger)
     if not args.data_file:
         print("[错误] B 线（office-token-booster）仅支持读取用户上传/导出的数据文件（ADR-9），"
-              "不实时采集 WorkBuddy 用量。用法: python report_engine.py <ledger.json> [--format markdown|html|json]",
+              "不实时采集宿主用量。用法: python report_engine.py <ledger.json> [--format markdown|html|json]",
               file=sys.stderr)
         return 2
 

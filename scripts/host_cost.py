@@ -9,7 +9,7 @@
 - 两个实现：
     - EventCostProvider       —— 包装一次宿主回报的 event["cost"]（v0.7 已支持的真实路径，
                                  在此升级为可单测的一等公民）。
-    - WorkBuddyLocalProvider  —— 只读本机 WorkBuddy 的本地用量数据
+    - LocalProvider  —— 只读本机宿主 的本地用量数据
                                  （~/.workbuddy/traces、workbuddy.db、usage-log.json）。
 - 全程纯标准库、无网络、无硬编码密钥、无副作用（只读 + 纯解析）。
 - 任何解析失败都降级为「跳过该条 / 返回空列表」，绝不抛异常炸掉调用方。
@@ -46,7 +46,7 @@ class CostRecord:
     model: str = ""
     task_type: Optional[str] = None
     session_id: str = ""
-    source: str = "host"             # 来源标识（workbuddy_traces / event）
+    source: str = "host"             # 来源标识（local_traces / event）
 
     def to_ledger_entry(self, *, baseline_tokens: int = 0, baseline_minutes: int = 0,
                         note: str = "") -> dict:
@@ -127,21 +127,21 @@ class EventCostProvider:
 
 
 # ─────────────────────────────────────────────────────────────
-# 实现 2：WorkBuddy 本地用量（本机只读，无网络 / 无密钥）
+# 实现 2：本机宿主本地用量（本机只读，无网络 / 无密钥）
 # ─────────────────────────────────────────────────────────────
 
-# 本机 WorkBuddy 数据根（与 agent-analytics-report 同源）。
-_WORKBUDDY_ROOT = Path(os.path.expanduser("~")) / ".workbuddy"
-_TRACES_DIR = _WORKBUDDY_ROOT / "traces"
-_DB_PATH = _WORKBUDDY_ROOT / "workbuddy.db"
-_USAGE_LOG = _WORKBUDDY_ROOT / "usage-log.json"
+# 本机宿主 数据根（与 agent-analytics-report 同源）。
+_LOCAL_ROOT = Path(os.path.expanduser("~")) / ".workbuddy"
+_TRACES_DIR = _LOCAL_ROOT / "traces"
+_DB_PATH = _LOCAL_ROOT / "workbuddy.db"
+_USAGE_LOG = _LOCAL_ROOT / "usage-log.json"
 
 
 def _extract_tokens(obj: dict) -> tuple[int, int]:
     """从一条 trace 记录里容忍地抽取 (skill_tokens, skill_minutes)。
 
     调用方应先把嵌套结构（如 {"trace": {...}}）解成 trace 级 dict 再传入。
-    不同 WorkBuddy 版本的字段名可能漂移，这里多键兜底的「防屎山」写法：
+    不同宿主版本的字段名可能漂移，这里多键兜底的「防屎山」写法：
     解析不到就返回 (0, 0)，绝不让单条脏数据炸掉整体。
     额外兜底：trace 级 `duration`（毫秒）折算成 skill_minutes，补全耗时维度。
     """
@@ -180,7 +180,7 @@ def _extract_tokens(obj: dict) -> tuple[int, int]:
         if _coerce_int(v):
             mins = _coerce_int(v)
             break
-    # duration(ms) → 分钟 兜底（真实 WorkBuddy trace 常见 duration 字段）
+    # duration(ms) → 分钟 兜底（真实宿主 trace 常见 duration 字段）
     if mins == 0:
         d = obj.get("duration")
         if isinstance(d, (int, float)) and d > 0:
@@ -189,7 +189,7 @@ def _extract_tokens(obj: dict) -> tuple[int, int]:
 
 
 def _extract_date(obj: dict) -> str:
-    # 兼容真实 WorkBuddy 的 ISO 时间戳 startedAt/endedAt，以及测试用的 date/day 等
+    # 兼容真实宿主的 ISO 时间戳 startedAt/endedAt，以及测试用的 date/day 等
     for k in ("date", "day", "timestamp", "created_at", "time", "startedAt", "endedAt"):
         v = obj.get(k)
         if isinstance(v, str) and len(v) >= 10:
@@ -222,15 +222,15 @@ def _read_trace_file(path: Path) -> Optional[dict]:
     return None
 
 
-class WorkBuddyLocalProvider:
-    """只读本机 WorkBuddy 的本地用量（traces / db / usage-log），返回真实 CostRecord。
+class LocalProvider:
+    """只读本机宿主 的本地用量（traces / db / usage-log），返回真实 CostRecord。
 
     红线：只读、纯解析、任何异常都降级（返回空/跳过），不碰网络、不碰密钥、不改文件。
-    schema 在不同 WorkBuddy 版本可能漂移，所有字段抽取都走 _extract_tokens /
+    schema 在不同宿主版本可能漂移，所有字段抽取都走 _extract_tokens /
     _extract_date 的容忍逻辑；解析不到就当没有。无数据时不报错，返回空列表。
     """
 
-    def __init__(self, root: Path = _WORKBUDDY_ROOT):
+    def __init__(self, root: Path = _LOCAL_ROOT):
         self.root = Path(root)
 
     def fetch_recent(self, days: int = 7) -> list[CostRecord]:
@@ -238,7 +238,7 @@ class WorkBuddyLocalProvider:
         traces_dir = self.root / "traces"
         if not traces_dir.is_dir():
             return []
-        # 真实 WorkBuddy 把 trace 存在 traces/<session_id>/trace_<hash>.json（嵌套子目录），
+        # 真实宿主把 trace 存在 traces/<session_id>/trace_<hash>.json（嵌套子目录），
         # 故用 rglob 递归；同时兼容测试用的扁平 traces/<file>.json。
         for p in sorted(traces_dir.rglob("*")):
             if not p.is_file():
@@ -266,7 +266,7 @@ class WorkBuddyLocalProvider:
                 task_type=tr.get("task_type") or tr.get("type"),
                 session_id=str(tr.get("session_id") or tr.get("sessionId")
                                or obj.get("session_id") or ""),
-                source="workbuddy_traces",
+                source="local_traces",
             )
             if _within_days(rec.date, days):
                 records.append(rec)
@@ -342,9 +342,9 @@ class GenericJsonProvider:
 
 
 def get_default_provider() -> Optional[HostCostProvider]:
-    """返回默认宿主用量提供方：本机 WorkBuddy 数据存在则用本地读取器，否则 None。"""
+    """返回默认宿主用量提供方：本机宿主 数据存在则用本地读取器，否则 None。"""
     if _TRACES_DIR.is_dir() or _DB_PATH.is_file() or _USAGE_LOG.is_file():
-        return WorkBuddyLocalProvider()
+        return LocalProvider()
     return None
 
 
@@ -378,21 +378,21 @@ def draft_entries_from_host(provider: HostCostProvider, days: int = 7, *,
 def main():
     import argparse
     parser = argparse.ArgumentParser(
-        description="办公室 Token 洞察 · v0.9 真实宿主用量接入（只读本机 WorkBuddy 数据）")
+        description="办公室 Token 洞察 · v0.9 真实宿主用量接入（只读本机宿主 数据）")
     parser.add_argument("--days", type=int, default=7, help="最近 N 天（默认 7）")
     parser.add_argument("--json", action="store_true", help="以 JSON 输出原始记录")
     args = parser.parse_args()
 
     provider = get_default_provider()
     if provider is None:
-        print("[信息] 未检测到本机 WorkBuddy 用量数据（~/.workbuddy/traces 等不存在）。")
+        print("[信息] 未检测到本机宿主 用量数据（~/.workbuddy/traces 等不存在）。")
         print("        宿主用量接入为可选能力；无数据时技能仍按『用户自报成本』正常工作。")
         return 0
     recs = provider.fetch_recent(args.days)
     if args.json:
         print(json.dumps([r.__dict__ for r in recs], ensure_ascii=False, indent=2))
     else:
-        print(f"=== 检测到本机 WorkBuddy 最近 {args.days} 天用量（{len(recs)} 条）===")
+        print(f"=== 检测到本机宿主 最近 {args.days} 天用量（{len(recs)} 条）===")
         for r in recs[:20]:
             print(f"  {r.date}  {r.skill_tokens:,} tok / {r.skill_minutes} min"
                   f"  模型={r.model or '?'}  任务={r.task_type or '未归类'}")

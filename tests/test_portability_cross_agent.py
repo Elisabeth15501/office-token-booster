@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from host_cost import (
-    CostRecord, HostCostProvider, WorkBuddyLocalProvider, EventCostProvider,
+    CostRecord, HostCostProvider, LocalProvider, EventCostProvider,
     GenericJsonProvider, _extract_tokens, draft_entries_from_host,
 )
 from ledger_agent import import_host_usage
@@ -90,10 +90,10 @@ def test_port_contract_minimal_provider_satisfies_protocol():
 @src_link("scripts/host_cost.py", line=69, name="HostCostProvider 契约源码")
 @allure.title("可移植性：所有真实 provider 实现均满足契约")
 @allure.severity(allure.severity_level.NORMAL)
-@allure.description("WorkBuddyLocalProvider / EventCostProvider / GenericJsonProvider 都实现同一契约。")
+@allure.description("LocalProvider / EventCostProvider / GenericJsonProvider 都实现同一契约。")
 @pytest.mark.smoke
 def test_port_contract_all_real_providers_satisfy():
-    assert isinstance(WorkBuddyLocalProvider(), HostCostProvider)
+    assert isinstance(LocalProvider(), HostCostProvider)
     assert isinstance(EventCostProvider({}), HostCostProvider)
     assert isinstance(GenericJsonProvider(REPO_ROOT / "nonexistent.json"), HostCostProvider)
 

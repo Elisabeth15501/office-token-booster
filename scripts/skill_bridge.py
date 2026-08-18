@@ -10,7 +10,7 @@
 - 只消费 conversation 暴露的 handle()/classify()/_detect_type()/_parse_numbers()，
   以及 diagnose 的 load_ledger/diagnose；**不改 diagnose / qa / report_engine /
   ledger_agent / conversation 一行**。
-- **去品牌化**：本模块不绑定任何具体平台（WorkBuddy / 天禧 / OpenClaw 皆可），
+- **去品牌化**：本模块不绑定任何具体平台（天禧 / OpenClaw 皆可），
   只认通用的「对话事件」契约，便于直接复用到比赛仓库。
 - 纯标准库、无第三方依赖、无网络、无硬编码密钥（满足 OpenClaw/天禧 安全红线）。
 - 安全默认：触发流只「建议」，绝不在用户确认前写回账本（沿用 run_long_chain(apply=False) 默认）。

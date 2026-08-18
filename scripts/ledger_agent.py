@@ -303,9 +303,9 @@ def run_long_chain(ledger_path, task_type, *, apply=False, date=None,
 def _resolve_import_provider(args):
     """根据 --provider / --provider-arg 解析 --import-host 的数据源 provider。
 
-    返回：provider 实例；None 表示用默认（本机 WorkBuddy）；False 表示参数错误（调用方 return 2）。
+    返回：provider 实例；None 表示用默认（本机宿主）；False 表示参数错误（调用方 return 2）。
     """
-    if args.provider is None or args.provider == "workbuddy":
+    if args.provider is None or args.provider == "local":
         return None  # 交给 import_host_usage 用 get_default_provider()
     if args.provider == "generic":
         if not args.provider_arg:
@@ -335,13 +335,13 @@ def main():
     parser.add_argument("--targets", action="store_true",
                         help="改为输出「待自动化类型建议」而不写回")
     parser.add_argument("--import-host", action="store_true",
-                        help="v0.9：把本机 WorkBuddy 真实用量导成账本草稿（dry-run 预览；加 --apply 写回）")
+                        help="v0.9：把本机宿主 真实用量导成账本草稿（dry-run 预览；加 --apply 写回）")
     parser.add_argument("--days", type=int, default=7,
                         help="--import-host 的时间窗（最近 N 天，默认 7）")
     parser.add_argument("--baseline-ratio", type=float, default=None,
                         help="v0.9：宿主导入时按 skill_tokens*ratio 估算 baseline（假设性，非实测扣费）")
-    parser.add_argument("--provider", choices=["workbuddy", "generic"], default=None,
-                        help="--import-host 的数据源：workbuddy（默认，本机 WorkBuddy traces）"
+    parser.add_argument("--provider", choices=["local", "generic"], default=None,
+                        help="--import-host 的数据源：local（默认，本机宿主 traces）"
                              "或 generic（任意主机导出的用法 JSON/JSONL 文件，需配 --provider-arg）")
     parser.add_argument("--provider-arg", default=None,
                         help="--provider generic 指向的用法文件 JSON/JSONL 路径")

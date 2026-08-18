@@ -4,7 +4,7 @@
 
 验证 v0.9「接真实宿主 cost」且防屎山：
   1. EventCostProvider：包装 event["cost"] 为可单测记录；无 cost 返回空
-  2. WorkBuddyLocalProvider：只读本机 traces → 真实 CostRecord；
+  2. LocalProvider：只读本机 traces → 真实 CostRecord；
      容忍 JSONL / 缺字段跳过 / 超窗过滤；无数据返回空（不崩）
   3. draft_entries_from_host：草稿 skill 取实测值、baseline 默认 0
   4. 触发流 enrichment：event 无 cost + 提供 provider → 自动补全 cost_source
@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from host_cost import (
-    CostRecord, EventCostProvider, WorkBuddyLocalProvider, draft_entries_from_host,
+    CostRecord, EventCostProvider, LocalProvider, draft_entries_from_host,
 )
 from skill_bridge import on_conversation_event
 from ledger_agent import import_host_usage
@@ -92,11 +92,11 @@ def test_v09_event_cost_provider():
 
 
 # ─────────────────────────────────────────────────────────────
-# 2. WorkBuddyLocalProvider — 读取 + 容忍 + 降级
+# 2. LocalProvider — 读取 + 容忍 + 降级
 # ─────────────────────────────────────────────────────────────
 
 @allure.feature("v0.9 真实宿主用量接入")
-@allure.story("WorkBuddy 本地用量读取")
+@allure.story("本机宿主本地用量读取")
 @allure.epic("office-token-booster")
 @allure.label("layer", "宿主适配层")
 @allure.label("test_type", "正向")
@@ -104,8 +104,8 @@ def test_v09_event_cost_provider():
 @allure.label("risk_area", "real_closed_loop")
 @allure.label("priority", "P1")
 @allure.label("suite", "v0.9")
-@src_link("scripts/host_cost.py", line=150, name="WorkBuddyLocalProvider.fetch_recent 源码")
-@allure.title("v0.9 WorkBuddyLocalProvider：读取 traces 真实用量")
+@src_link("scripts/host_cost.py", line=150, name="LocalProvider.fetch_recent 源码")
+@allure.title("v0.9 LocalProvider：读取 traces 真实用量")
 @allure.severity(allure.severity_level.CRITICAL)
 @allure.description("验证只读本机 traces 能解析出真实 CostRecord（token/日期/来源）。")
 @pytest.mark.smoke
@@ -119,7 +119,7 @@ def test_v09_workbuddy_provider_reads_traces():
             "date": today, "model": "glm-5.2", "task_type": "周报生成",
         }, ensure_ascii=False)},
     )
-    recs = WorkBuddyLocalProvider(root=root).fetch_recent(7)
+    recs = LocalProvider(root=root).fetch_recent(7)
     with allure.step("断言记录字段正确"):
         attach_text(recs, "wb records")
         assert len(recs) == 1
@@ -128,11 +128,11 @@ def test_v09_workbuddy_provider_reads_traces():
         assert r.date == today
         assert r.model == "glm-5.2"
         assert r.task_type == "周报生成"
-        assert r.source == "workbuddy_traces"
+        assert r.source == "local_traces"
 
 
 @allure.feature("v0.9 真实宿主用量接入")
-@allure.story("WorkBuddy 本地用量读取（容忍/降级）")
+@allure.story("本机宿主本地用量读取（容忍/降级）")
 @allure.epic("office-token-booster")
 @allure.label("layer", "宿主适配层")
 @allure.label("test_type", "边界")
@@ -140,7 +140,7 @@ def test_v09_workbuddy_provider_reads_traces():
 @allure.label("risk_area", "real_closed_loop")
 @allure.label("priority", "P2")
 @allure.label("suite", "v0.9")
-@src_link("scripts/host_cost.py", line=150, name="WorkBuddyLocalProvider.fetch_recent 源码")
+@src_link("scripts/host_cost.py", line=150, name="LocalProvider.fetch_recent 源码")
 @allure.title("v0.9 容忍 JSONL / 缺字段跳过 / 超窗过滤")
 @allure.severity(allure.severity_level.NORMAL)
 @allure.description("验证脏数据跳过、超时间窗过滤、JSONL 兼容，且不抛异常。")
@@ -161,7 +161,7 @@ def test_v09_workbuddy_provider_tolerant_and_window():
             "old.json": json.dumps({"effective_tokens": 9999, "date": old}),
         },
     )
-    recs = WorkBuddyLocalProvider(root=root).fetch_recent(7)
+    recs = LocalProvider(root=root).fetch_recent(7)
     with allure.step("断言只留窗口内、有 token 的记录"):
         attach_text(recs, "wb records (filtered)")
         assert len(recs) == 1, f"应仅 1 条（窗口内+有token）: {recs}"
@@ -170,7 +170,7 @@ def test_v09_workbuddy_provider_tolerant_and_window():
 
 
 @allure.feature("v0.9 真实宿主用量接入")
-@allure.story("WorkBuddy 本地用量读取（无数据降级）")
+@allure.story("本机宿主本地用量读取（无数据降级）")
 @allure.epic("office-token-booster")
 @allure.label("layer", "宿主适配层")
 @allure.label("test_type", "边界")
@@ -178,14 +178,14 @@ def test_v09_workbuddy_provider_tolerant_and_window():
 @allure.label("risk_area", "real_closed_loop")
 @allure.label("priority", "P2")
 @allure.label("suite", "v0.9")
-@src_link("scripts/host_cost.py", line=150, name="WorkBuddyLocalProvider.fetch_recent 源码")
+@src_link("scripts/host_cost.py", line=150, name="LocalProvider.fetch_recent 源码")
 @allure.title("v0.9 无 traces 目录 → 返回空（不崩）")
 @allure.severity(allure.severity_level.NORMAL)
 @allure.description("验证根下无 traces 时返回空列表，不抛异常（防屎山降级）。")
 @pytest.mark.regression
 def test_v09_workbuddy_provider_no_data():
     root = Path(tempfile.mkdtemp())  # 空根，无 traces
-    recs = WorkBuddyLocalProvider(root=root).fetch_recent(7)
+    recs = LocalProvider(root=root).fetch_recent(7)
     assert recs == [], "无数据应返回空列表"
 
 
@@ -209,7 +209,7 @@ def test_v09_workbuddy_provider_no_data():
 @pytest.mark.smoke
 def test_v09_draft_entries_from_host():
     rec = CostRecord(date=_today(), skill_tokens=4200, skill_minutes=9,
-                     task_type="周报生成", source="workbuddy_traces")
+                     task_type="周报生成", source="local_traces")
     entries = draft_entries_from_host(_FakeProvider([rec]), days=7)
     with allure.step("断言草稿字段"):
         attach_text(entries, "draft entries")

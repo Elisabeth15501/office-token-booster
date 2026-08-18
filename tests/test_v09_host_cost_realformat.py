@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""tests/test_v09_host_cost_realformat.py — 锁住「真实 WorkBuddy trace 格式」解析
+"""tests/test_v09_host_cost_realformat.py — 锁住「真实宿主 trace 格式」解析
 
-实测发现 v0.9 初版 WorkBuddyLocalProvider 读不懂本机真实 trace：
+实测发现 v0.9 初版 LocalProvider 读不懂本机真实 trace：
   - 真实 trace 藏在 traces/<session_id>/trace_<hash>.json（嵌套子目录），初版只 glob 顶层 → 0 条
   - 真实 token 字段在 trace.totalTokens，初版在顶层找 → 0
   - 真实日期字段是 trace.startedAt（ISO），初版键表无 → 退回今天
@@ -25,7 +25,7 @@ import allure
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from host_cost import WorkBuddyLocalProvider, draft_entries_from_host, CostRecord
+from host_cost import LocalProvider, draft_entries_from_host, CostRecord
 from ledger_agent import import_host_usage
 from helpers import attach_text, src_link
 
@@ -63,14 +63,14 @@ def _make_real_wb_root(tmp):
 @allure.label("risk_area", "real_closed_loop")
 @allure.label("priority", "P0")
 @allure.label("suite", "v0.9")
-@src_link("scripts/host_cost.py", line=200, name="WorkBuddyLocalProvider.fetch_recent 源码")
+@src_link("scripts/host_cost.py", line=200, name="LocalProvider.fetch_recent 源码")
 @allure.title("v0.9 真实格式：嵌套子目录 + trace.totalTokens + startedAt 解析")
 @allure.severity(allure.severity_level.CRITICAL)
 @allure.description("复刻本机真实 trace 结构，确保 provider 递归子目录、读 trace.totalTokens/startedAt/duration。")
 @pytest.mark.smoke
 def test_v09_real_nested_trace_format():
     root = _make_real_wb_root(tempfile.mkdtemp())
-    recs = WorkBuddyLocalProvider(root=root).fetch_recent(7)
+    recs = LocalProvider(root=root).fetch_recent(7)
     with allure.step("断言真实嵌套结构被正确解析"):
         attach_text(recs, "real-format records")
         assert len(recs) == 1
@@ -80,7 +80,7 @@ def test_v09_real_nested_trace_format():
         assert r.model == "hy3", "应读 trace.modelInfo.models[0]"
         assert r.skill_minutes == 3, "duration(ms) 应折算为约 3 分钟"
         assert r.session_id == "2bb3ef57-38d3-423b-8272-f559f4fe679f"
-        assert r.source == "workbuddy_traces"
+        assert r.source == "local_traces"
 
 
 @allure.feature("v0.9 真实宿主用量接入")
@@ -99,7 +99,7 @@ def test_v09_real_nested_trace_format():
 @pytest.mark.smoke
 def test_v09_draft_entries_baseline_ratio():
     rec = CostRecord(date="2026-08-15", skill_tokens=1000, skill_minutes=5,
-                     task_type="AI办公任务", source="workbuddy_traces")
+                     task_type="AI办公任务", source="local_traces")
     entries = draft_entries_from_host(_FakeProvider(rec), days=7, baseline_ratio=3.0)
     with allure.step("断言 baseline = skill*ratio"):
         attach_text(entries, "draft entries (ratio=3)")
@@ -127,7 +127,7 @@ def test_v09_import_realformat_dryrun():
     json.dump({"tasks": []}, ledger)
     ledger.close()
     try:
-        provider = WorkBuddyLocalProvider(root=_make_real_wb_root(tempfile.mkdtemp()))
+        provider = LocalProvider(root=_make_real_wb_root(tempfile.mkdtemp()))
         res = import_host_usage(ledger.name, days=7, provider=provider, apply=False,
                                 baseline_ratio=3.0)
         with allure.step("断言真实格式可读且 dry-run 安全"):
