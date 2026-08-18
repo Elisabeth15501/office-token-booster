@@ -431,6 +431,112 @@ def test_port_dedup_by_session_id():
         os.unlink(ledger.name)
 
 
+@allure.feature("跨 Agent / 多平台可移植性")
+@allure.story("CLI --provider generic 开关")
+@allure.epic("office-token-booster")
+@allure.label("layer", "cli")
+@allure.label("test_type", "集成")
+@allure.label("component", "ledger_agent CLI")
+@allure.label("risk_area", "portability")
+@allure.label("priority", "P1")
+@allure.label("suite", "portability")
+@allure.title("CLI：--provider generic 读第三方用法文件并写回")
+@allure.severity(allure.severity_level.NORMAL)
+@pytest.mark.smoke
+def test_cli_provider_generic_imports(tmp_path):
+    """正对天禧/OpenClaw：第三方主机只要导出 JSON，CLI --provider generic 即可零代码导入。"""
+    export = tmp_path / "foreign_usage.json"
+    export.write_text(json.dumps([
+        {"totalTokens": 1200, "model": "tianxi-gpt-x", "startedAt": "2026-08-16T10:00:00Z", "type": "周报生成"},
+        {"totalTokens": 3300, "model": "tianxi-gpt-x", "startedAt": "2026-08-17T11:00:00Z"},
+    ], ensure_ascii=False), encoding="utf-8")
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({"tasks": []}, ensure_ascii=False), encoding="utf-8")
+    r = subprocess.run([sys.executable, str(REPO_ROOT / "scripts" / "ledger_agent.py"),
+                        str(ledger), "--import-host", "--provider", "generic",
+                        "--provider-arg", str(export), "--apply", "--baseline-ratio", "3"],
+                       cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=60,
+                       encoding="utf-8")
+    with allure.step("断言导入成功且写回 2 条"):
+        attach_text(r.stdout + r.stderr, "cli generic import")
+        assert r.returncode == 0, r.stderr
+        tasks = json.load(open(ledger, encoding="utf-8"))["tasks"]
+        assert len(tasks) == 2
+        assert tasks[0].get("source") == "generic_json"
+
+
+@allure.feature("跨 Agent / 多平台可移植性")
+@allure.story("CLI --provider generic 开关")
+@allure.epic("office-token-booster")
+@allure.label("layer", "cli")
+@allure.label("test_type", "契约")
+@allure.label("component", "ledger_agent CLI")
+@allure.label("risk_area", "portability")
+@allure.label("priority", "P1")
+@allure.label("suite", "portability")
+@allure.title("CLI：--provider generic 缺 --provider-arg 应报错 exit 2")
+@allure.severity(allure.severity_level.NORMAL)
+def test_cli_provider_generic_requires_arg(tmp_path):
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({"tasks": []}, ensure_ascii=False), encoding="utf-8")
+    r = subprocess.run([sys.executable, str(REPO_ROOT / "scripts" / "ledger_agent.py"),
+                        str(ledger), "--import-host", "--provider", "generic", "--apply"],
+                       cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=60,
+                       encoding="utf-8")
+    with allure.step("断言 exit 2 且提示缺 provider-arg"):
+        attach_text(r.stderr, "cli error")
+        assert r.returncode == 2
+        assert "provider-arg" in r.stderr
+
+
+@allure.feature("跨 Agent / 多平台可移植性")
+@allure.story("无 session_id 的宿主条目内容签名去重")
+@allure.epic("office-token-booster")
+@allure.label("layer", "core")
+@allure.label("test_type", "契约")
+@allure.label("component", "import_host_usage")
+@allure.label("risk_area", "dedup")
+@allure.label("priority", "P0")
+@allure.label("suite", "portability")
+@allure.title("去重：缺 session_id 的宿主条目按内容签名去重（天禧/OpenClaw 场景）")
+@allure.severity(allure.severity_level.CRITICAL)
+@pytest.mark.smoke
+def test_port_dedup_content_signature_no_session_id():
+    """第三方 generic 导出往往没有 session_id；重复导入应靠内容签名去重而非膨胀。"""
+    ledger = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
+    json.dump({"tasks": []}, ledger)
+    ledger.close()
+    try:
+        provider = _TianxiLikeProvider([
+            CostRecord(date="2026-08-15", skill_tokens=100, session_id="", source="generic_json"),
+            CostRecord(date="2026-08-16", skill_tokens=200, session_id="", source="generic_json"),
+        ])
+        r1 = import_host_usage(ledger.name, days=7, provider=provider, apply=True, baseline_ratio=3.0)
+        with allure.step("首次导入 2 条"):
+            assert r1["count"] == 2
+            assert r1["skipped_duplicates"] == 0
+        r2 = import_host_usage(ledger.name, days=7, provider=provider, apply=True, baseline_ratio=3.0)
+        with allure.step("重复导入应内容签名去重，账本不膨胀"):
+            assert r2["skipped_duplicates"] == 2
+            on_disk = json.load(open(ledger.name, encoding="utf-8"))
+            assert len(on_disk["tasks"]) == 2
+
+        # 用户手记条目（无 source）不被误删
+        manual = {"date": "2026-08-15", "type": "周报生成", "skill_tokens": 100,
+                  "baseline_tokens": 300, "skill_minutes": 0, "baseline_minutes": 0,
+                  "note": "手记"}
+        on_disk = json.load(open(ledger.name, encoding="utf-8"))
+        on_disk["tasks"].append(manual)
+        json.dump(on_disk, open(ledger.name, "w", encoding="utf-8"))
+        r3 = import_host_usage(ledger.name, days=7, provider=provider, apply=True, baseline_ratio=3.0)
+        with allure.step("手记条目保留，总数 = 3"):
+            assert r3["skipped_duplicates"] == 2
+            on_disk = json.load(open(ledger.name, encoding="utf-8"))
+            assert len(on_disk["tasks"]) == 3, "手记应保留不被去重"
+    finally:
+        os.unlink(ledger.name)
+
+
 if __name__ == "__main__":
     _report_dir = str(REPO_ROOT / "allure-results")
     print(f"Allure 数据 → {_report_dir}")

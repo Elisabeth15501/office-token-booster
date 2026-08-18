@@ -54,8 +54,17 @@ entries = draft_entries_from_host(GenericJsonProvider("<用法文件>.json"), da
 或通过 `ledger_agent.import_host_usage(ledger_path, days=7,
 provider=GenericJsonProvider("<用法文件>.json"), apply=True)` 直接写回。
 
-> 注：CLI 的 `--provider generic --provider-arg` 开关为后续接入预留，
-> 当前 v0.9 用上方 Python 接口即可，无需改 skill 内核。
+或通过 **CLI 零代码接入**（天禧/OpenClaw 只需把用法导出成文件）：
+
+```bash
+python scripts/ledger_agent.py <账本>.json \n    --import-host --provider generic --provider-arg <用法文件>.json \n    --days 7 --baseline-ratio 3 --apply
+```
+
+- `--provider generic`：使用宿主无关的 `GenericJsonProvider` 读取任意主机的用法 JSON/JSONL。
+- `--provider-arg <路径>`：指向第三方导出的用法文件（缺省报错退出，提示补 `--provider-arg`）。
+- `--provider workbuddy`（默认，可省略）：本机 WorkBuddy traces 读取器。
+- 重复导入自动去重（有 session_id 用 session_id；第三方缺 session_id 按内容签名去重），不膨胀账本。
+- 无需改 skill 内核：CLI 仅构造 provider 后交给既有的 `import_host_usage`。
 
 识别的字段名（均容忍，解析不到即跳过该条，**绝不抛异常**）：
 

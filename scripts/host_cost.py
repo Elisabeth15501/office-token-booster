@@ -65,6 +65,7 @@ class CostRecord:
             "baseline_minutes": int(baseline_minutes),
             "skill_minutes": int(self.skill_minutes),
             "note": note or f"宿主实测({self.source})",
+            "source": self.source,
         }
 
 

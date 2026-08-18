@@ -241,11 +241,23 @@ def import_host_usage(ledger_path, days=7, provider=None, *,
         return {"entries": entries, "count": len(entries), "applied": False,
                 "backup_path": None, "new_diag": new_diag, "note": "dry-run 预览，未写盘。"}
 
-    # 写回前按 session_id 去重：宿主重复导入不会把同一会话追加成多条（修复真实缺口）
+    # 写回前去重：宿主重复导入不会把同一会话追加成多条（修复真实缺口）。
+    # 去重键：有 session_id 用之；无 session_id 的「宿主条目」退回内容签名；
+    # 用户手记条目（无 source）一律保留，避免误删。
     existing_tasks = load_ledger(ledger_path)
-    seen_ids = {t.get("session_id") for t in existing_tasks if t.get("session_id")}
-    new_entries = [e for e in entries
-                   if not (e.get("session_id") and e["session_id"] in seen_ids)]
+
+    def _dedup_key(t: dict):
+        sid = t.get("session_id")
+        if sid:
+            return ("sid", sid)
+        if t.get("source"):  # 宿主产生但缺 session_id（如第三方 generic 导出）
+            return ("sig", t.get("date"), t.get("type"), t.get("model"),
+                    t.get("skill_tokens"), t.get("skill_minutes"),
+                    t.get("baseline_tokens"), t.get("baseline_minutes"))
+        return ("keep", id(t))  # 用户手记条目，不去重
+
+    seen_keys = {_dedup_key(t) for t in existing_tasks}
+    new_entries = [e for e in entries if _dedup_key(e) not in seen_keys]
     skipped = len(entries) - len(new_entries)
 
     new_ledger, bak = append_entries(
@@ -288,6 +300,23 @@ def run_long_chain(ledger_path, task_type, *, apply=False, date=None,
 # CLI（薄包装，与内核解耦）
 # ─────────────────────────────────────────────────────────────
 
+def _resolve_import_provider(args):
+    """根据 --provider / --provider-arg 解析 --import-host 的数据源 provider。
+
+    返回：provider 实例；None 表示用默认（本机 WorkBuddy）；False 表示参数错误（调用方 return 2）。
+    """
+    if args.provider is None or args.provider == "workbuddy":
+        return None  # 交给 import_host_usage 用 get_default_provider()
+    if args.provider == "generic":
+        if not args.provider_arg:
+            print("[错误] --provider generic 需要配合 --provider-arg <用法文件.json> 指定导出路径",
+                  file=sys.stderr)
+            return False
+        from host_cost import GenericJsonProvider
+        return GenericJsonProvider(Path(args.provider_arg))
+    return None
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(
@@ -311,6 +340,11 @@ def main():
                         help="--import-host 的时间窗（最近 N 天，默认 7）")
     parser.add_argument("--baseline-ratio", type=float, default=None,
                         help="v0.9：宿主导入时按 skill_tokens*ratio 估算 baseline（假设性，非实测扣费）")
+    parser.add_argument("--provider", choices=["workbuddy", "generic"], default=None,
+                        help="--import-host 的数据源：workbuddy（默认，本机 WorkBuddy traces）"
+                             "或 generic（任意主机导出的用法 JSON/JSONL 文件，需配 --provider-arg）")
+    parser.add_argument("--provider-arg", default=None,
+                        help="--provider generic 指向的用法文件 JSON/JSONL 路径")
     args = parser.parse_args()
 
     if not args.ledger:
@@ -327,8 +361,11 @@ def main():
     diag = diagnose(tasks)
 
     if args.import_host:
+        provider = _resolve_import_provider(args)
+        if provider is False:
+            return 2
         res = import_host_usage(args.ledger, days=args.days, apply=args.apply,
-                                baseline_ratio=args.baseline_ratio)
+                                baseline_ratio=args.baseline_ratio, provider=provider)
         print("=== v0.9 真实宿主用量导入 ===")
         print(res["note"])
         if args.baseline_ratio:
