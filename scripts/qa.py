@@ -35,6 +35,16 @@ def _lowest_type(diag):
     return min(diag.by_type, key=lambda x: x["saved_tokens"]) if diag.by_type else None
 
 
+def _consume_most_type(diag):
+    """Token 实际消耗最多的类型（本技能实耗 skill_tokens 最高）。
+
+    与「节省最多」(_top_type) 严格区分：消耗 = 你为这类任务实际花掉的 Token，
+    节省 = 基准 − 实耗的差额。追问里的「消耗最多」必须锚定 skill_tokens，
+    不能落到 saved_tokens 分支（历史语义坑：'最多' 关键词曾错误路由到节省）。
+    """
+    return max(diag.by_type, key=lambda x: x["skill_tokens"]) if diag.by_type else None
+
+
 def _match_type(diag, q):
     """若追问里出现某个已记录的任务类型名，返回该类型 dict，否则 None。"""
     for d in diag.by_type:
@@ -126,6 +136,20 @@ def answer_followup(diag, question):
     if any(k in q for k in ("比例", "百分比", "省了", "省多少", "%", "多高")):
         return (f"Token 节省比例 {diag.token_save_pct:.1f}%，"
                 f"时间节省比例 {diag.time_save_pct:.1f}%。")
+
+    # 哪个类型「消耗」Token 最多（实耗，而非节省）—— 须置于「节省最多」分支之前。
+    # 关键词命中「消耗/用量/占用/实耗/花掉/用了多少/花了多少/用掉/用得最多」即视为「消耗」意图，
+    # 但同期若显式问「省/节省」，则交给下方「节省最多」分支处理（避免误判）。
+    if any(k in q for k in ("消耗", "用量", "占用", "实耗", "花掉", "用了多少", "花了多少", "用掉", "用得最多")):
+        if not any(k in q for k in ("省", "节省", "省下")):
+            cons = _consume_most_type(diag)
+            if cons:
+                return (
+                    f"Token 实耗最多的任务类型是「{cons['task_type']}」：{cons['count']} 次共消耗 "
+                    f"{format_number(cons['skill_tokens'])} Token（本技能实耗）；"
+                    f"其手搓基准约 {format_number(cons['baseline_tokens'])} Token。"
+                )
+            return "暂无可统计的任务类型。"
 
     # 哪个类型节省最多
     if any(k in q for k in ("最多", "最高", "主力", "第一", "最大", "top", "Top")):
