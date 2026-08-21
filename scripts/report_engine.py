@@ -42,6 +42,7 @@ import sys
 import unicodedata
 from pathlib import Path
 from diagnose import format_number, load_ledger, diagnose, Diagnosis, _safe_div
+from skill_recommender import recommend_skills, format_recommendations_md, format_recommendations_html
 
 
 # ─────────────────────────────────────────────────────────────
@@ -360,8 +361,25 @@ def generate_markdown_report(s):
         L.append(f"- {x}")
     L.append("")
 
-    # 九、下周展望
-    L.append("## 九、下周展望")
+    # 九、推荐 Skill（v0.9.1 新增）
+    recs = recommend_skills(s.by_type, s.n)
+    if recs:
+        L.append("## 九、推荐 Skill")
+        L.append("")
+        L.append("> 基于你的任务类型和消耗量，推荐以下 Skill 来降低 Token 成本：\n")
+        for rec in recs:
+            priority_emoji = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟢"}.get(rec.priority, "⚪")
+            L.append(f"### {priority_emoji} 推荐：{rec.skill}")
+            L.append("")
+            L.append(f"- **原因**：{rec.reason}")
+            L.append(f"- **预期节省**：{rec.expected_saving}")
+            L.append(f"- **安装命令**：`{rec.install_cmd}`")
+            if rec.evidence_url:
+                L.append(f"- **数据来源**：{rec.evidence_url}")
+            L.append("")
+
+    # 十一、下周展望
+    L.append("## 十一、下周展望")
     L.append("")
     L.append("- 持续记录任务账本，观察节省趋势是否稳定。")
     L.append("- 对高频 / 高基线场景沉淀为可复用提示词模板，进一步压缩技能 Token。")
@@ -370,7 +388,7 @@ def generate_markdown_report(s):
 
     # 数据可信度提示（baseline 护栏，v0.2 新增）
     if s.caveats:
-        L.append("## 十、数据可信度提示")
+        L.append("## 十二、数据可信度提示")
         L.append("")
         L.append("> 节省值基于你填写的基准估计，以下提示用于校验「提效」声称的可信度：")
         L.append("")
@@ -422,6 +440,10 @@ def generate_html_report(s):
     insight_html = "".join(f"<li>{x}</li>" for x in insights)
     rec_html = "".join(f"<li>{x}</li>" for x in recs)
     caveat_html = "".join(f"<li>{c}</li>" for c in s.caveats)
+
+    # Skill 推荐板块（v0.9.1 新增）
+    skill_recs = recommend_skills(s.by_type, s.n)
+    skill_rec_html = format_recommendations_html(skill_recs)
 
     task_rows = ""
     for t in s.tasks:
@@ -504,6 +526,7 @@ def generate_html_report(s):
 <h2>四、核心洞察与建议</h2>
 <p><strong>洞察</strong></p><ul>{insight_html}</ul>
 <p><strong>建议</strong></p><ul>{rec_html}</ul>
+{skill_rec_html}
 {caveat_block}
 <p class="note">节省值为基于你填写的基准估计计算的参考值，用于建立提效体感，非平台计费数据。本报告全部本地生成，不含任何外部传输。</p>
 </body></html>"""
@@ -563,6 +586,19 @@ def generate_markdown_summary(s):
     L.append(f"- {s.insights[0] if s.insights else '暂无数据。'}")
     L.append("")
     L.append(_credibility_block_md(s))
+
+    # Skill 推荐（v0.9.1 新增）
+    skill_recs = recommend_skills(s.by_type, s.n)
+    if skill_recs:
+        L.append("## 推荐 Skill")
+        L.append("")
+        for rec in skill_recs:
+            L.append(f"### 🎯 {rec.skill}")
+            L.append(f"- **原因**：{rec.reason}")
+            L.append(f"- **预期节省**：{rec.expected_saving}")
+            L.append(f"- **安装**：`{rec.install_cmd}`")
+            L.append("")
+
     L.append("---")
     L.append(f"*{s.methodology}*")
     L.append("")
@@ -580,6 +616,10 @@ def generate_html_summary(s):
     trend_chart = build_trend_line_chart(s.by_week)
     compare_card = build_compare_card(s.period_compare)
     roi_card = build_roi_card(s.roi_targets)
+    # Skill 推荐（v0.9.1 新增）
+    skill_recs = recommend_skills(s.by_type, s.n)
+    skill_rec_html = format_recommendations_html(skill_recs)
+
     if s.caveats:
         cred_html = ('<p style="color:var(--muted)">节省值基于你填写的基准估计，以下提示用于校验「提效」声称的可信度：</p>'
                      '<ul>' + "".join(f"<li>⚠️ {c}</li>" for c in s.caveats) + "</ul>")
@@ -629,6 +669,7 @@ def generate_html_summary(s):
 {roi_card}
 <h2>提效主力</h2><p>{top_html}</p>
 <h2>一句话结论</h2><p>{conclusion}</p>
+{skill_rec_html}
 <h2>数据可信度</h2>{cred_html}
 <p class="note">{s.methodology}</p>
 </body></html>"""
