@@ -361,8 +361,8 @@ def generate_markdown_report(s):
         L.append(f"- {x}")
     L.append("")
 
-    # 九、推荐 Skill（v0.9.1 新增）
-    recs = recommend_skills(s.by_type, s.n)
+    # 九、推荐 Skill（v0.9.2 新增联网搜索）
+    recs = recommend_skills(s.by_type, s.n, use_online_search=args.online)
     if recs:
         L.append("## 九、推荐 Skill")
         L.append("")
@@ -441,8 +441,8 @@ def generate_html_report(s):
     rec_html = "".join(f"<li>{x}</li>" for x in recs)
     caveat_html = "".join(f"<li>{c}</li>" for c in s.caveats)
 
-    # Skill 推荐板块（v0.9.1 新增）
-    skill_recs = recommend_skills(s.by_type, s.n)
+    # Skill 推荐板块（v0.9.2 支持联网搜索）
+    skill_recs = recommend_skills(s.by_type, s.n, use_online_search=args.online)
     skill_rec_html = format_recommendations_html(skill_recs)
 
     task_rows = ""
@@ -689,6 +689,8 @@ def main():
                         choices=["markdown", "html", "json"], help="输出格式")
     parser.add_argument("--summary", action="store_true",
                         help="输出一页摘要（对话式诊断首屏），而非完整报告")
+    parser.add_argument("--online", action="store_true",
+                        help="启用 SkillHub 联网搜索，获取最新 Skill 信息（Phase 2）")
     args = parser.parse_args()
 
     if not args.data_file:
