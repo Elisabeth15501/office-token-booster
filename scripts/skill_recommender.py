@@ -31,6 +31,7 @@ class SkillRecommendation:
     # Phase 2 新增字段
     skillhub_slug: Optional[str] = None  # SkillHub slug（用于联网查询）
     skillhub_info: Optional[dict] = None  # SkillHub 详情（搜索后填充）
+    clawhub_info: Optional[dict] = None   # ClawHub 详情（搜索后填充）
     requires_confirmation: bool = True  # 是否需用户确认才安装
 
 
@@ -198,22 +199,52 @@ def recommend_skills(
     # 4. Phase 2：联网搜索补充信息（可选）
     if use_online_search and result:
         from skillhub_client import search_token_saving_skills
-        online_skills = search_token_saving_skills(limit=10)
-        for rec in result:
-            if rec.skillhub_slug and not rec.skillhub_info:
-                # 尝试从搜索结果中找到匹配的 Skill
-                for skill in online_skills.skills:
-                    if skill.slug == rec.skillhub_slug or skill.name.lower() == rec.skill.lower():
-                        rec.skillhub_info = {
-                            "slug": skill.slug,
-                            "name": skill.name,
-                            "description": skill.description_zh,
-                            "stars": skill.stars,
-                            "installs": skill.installs,
-                            "homepage": skill.homepage,
-                            "tags": skill.tags,
-                        }
-                        break
+        from clawhub_client import search_clawhub
+
+        # 搜索 SkillHub
+        try:
+            online_skills = search_token_saving_skills(limit=10)
+            for rec in result:
+                if rec.skillhub_slug and not rec.skillhub_info:
+                    # 尝试从搜索结果中找到匹配的 Skill
+                    for skill in online_skills.skills:
+                        if skill.slug == rec.skillhub_slug or skill.name.lower() == rec.skill.lower():
+                            rec.skillhub_info = {
+                                "source": "skillhub",
+                                "slug": skill.slug,
+                                "name": skill.name,
+                                "description": skill.description_zh,
+                                "stars": skill.stars,
+                                "installs": skill.installs,
+                                "homepage": skill.homepage,
+                                "tags": skill.tags,
+                            }
+                            break
+        except Exception as e:
+            print(f"[SkillRecommender] SkillHub search failed: {e}", file=__import__("sys").stderr)
+
+        # 搜索 ClawHub
+        try:
+            clawhub_skills = search_clawhub(result[0].skill, limit=5)
+            for rec in result:
+                if not rec.clawhub_info:
+                    # 尝试匹配
+                    for skill in clawhub_skills.skills:
+                        if skill.slug == rec.skill or skill.name.lower() == rec.skill.lower():
+                            rec.clawhub_info = {
+                                "slug": skill.slug,
+                                "name": skill.name,
+                                "summary": skill.summary,
+                                "owner": skill.owner,
+                                "stars": skill.stars,
+                                "installs": skill.installs,
+                                "tags": skill.tags,
+                                "homepage": skill.homepage,
+                                "install_ref": skill.install_ref,
+                            }
+                            break
+        except Exception as e:
+            print(f"[SkillRecommender] ClawHub search failed: {e}", file=__import__("sys").stderr)
 
     return result
 
@@ -233,6 +264,19 @@ def format_recommendation_md(rec: SkillRecommendation) -> str:
         lines.append(f"- **SkillHub**：⭐{info.get('stars', 0)} | {info.get('installs', 0)} 安装")
         if info.get('description'):
             lines.append(f"- **描述**：{info['description'][:100]}...")
+        if info.get('homepage'):
+            lines.append(f"- **仓库**：{info['homepage']}")
+        if info.get('tags'):
+            lines.append(f"- **标签**：{', '.join(info['tags'][:5])}")
+
+    # 如果有 ClawHub 信息，显示详细数据
+    if rec.clawhub_info:
+        info = rec.clawhub_info
+        lines.append(f"- **ClawHub**：⭐{info.get('stars', 0)} | {info.get('installs', 0)} 安装")
+        if info.get('summary'):
+            lines.append(f"- **描述**：{info['summary'][:100]}...")
+        if info.get('owner'):
+            lines.append(f"- **作者**：{info['owner']}")
         if info.get('homepage'):
             lines.append(f"- **仓库**：{info['homepage']}")
         if info.get('tags'):
