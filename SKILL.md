@@ -56,6 +56,13 @@ non_triggers:
 tools:
   - filesystem
   - shell
+network:
+  outbound: true
+  allowed_domains:
+    - "lightmake.site"
+    - "clawhub.ai"
+  note: "仅用于搜索技能市场，不上传用户数据"
+
 metadata:
   openclaw:
     requires:
