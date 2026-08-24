@@ -1,7 +1,7 @@
 ---
 name: office-token-booster
 description: 办公室 Token 洞察与提效助手 —— 看清你用 AI 办公到底省了多少 Token 和时间。它不替你做会议纪要/Excel/周报，而是帮你记账、对比「笨办法 vs 本技能」的 Token 与耗时，并给出最该自动化的 ROI 建议。适用于办公生产力复盘、AI 用量洞察、提效度量与自动化决策场景。
-version: 0.9.0
+version: 0.9.3
 author: Elisabeth15501
 license: MIT
 tags:
