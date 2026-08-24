@@ -20,9 +20,14 @@ class TestClawHubClient:
 
     def test_search_result_structure(self):
         from clawhub_client import ClawHubSkill, ClawHubSearchResponse
-        assert hasattr(ClawHubSkill, "slug")
-        assert hasattr(ClawHubSkill, "name")
-        assert hasattr(ClawHubSearchResponse, "skills")
+        # 创建实例来检查字段
+        skill = ClawHubSkill(
+            slug="test", name="Test", summary="", owner="test", stars=0, installs=0, tags=[]
+        )
+        assert hasattr(skill, "slug")
+        assert hasattr(skill, "name")
+        resp = ClawHubSearchResponse(skills=[], total=0, query="test")
+        assert hasattr(resp, "skills")
 
     def test_format_install_warning_contains_skill_name(self):
         from clawhub_client import ClawHubSkill, format_clawhub_install_warning

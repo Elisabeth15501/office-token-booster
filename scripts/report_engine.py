@@ -262,7 +262,7 @@ def build_roi_card(roi_targets, top_n=3):
 # Markdown 报告（九段结构，办公域适配）
 # ─────────────────────────────────────────────────────────────
 
-def generate_markdown_report(s):
+def generate_markdown_report(s, *, use_online_search=False):
     L = []
     L.append("# 办公室提效报告")
     L.append("")
@@ -362,7 +362,7 @@ def generate_markdown_report(s):
     L.append("")
 
     # 九、推荐 Skill（v0.9.2 新增联网搜索）
-    recs = recommend_skills(s.by_type, s.n, use_online_search=args.online)
+    recs = recommend_skills(s.by_type, s.n, use_online_search=use_online_search)
     if recs:
         L.append("## 九、推荐 Skill")
         L.append("")
@@ -412,7 +412,7 @@ def _bar_html(value, max_value, color="#2ecc71"):
             f'<div style="background:{color};height:14px;border-radius:4px;width:{w}%;"></div></div>')
 
 
-def generate_html_report(s):
+def generate_html_report(s, *, use_online_search=False):
     donut = build_donut_chart(s.by_type, title="各任务类型 节省 Token 占比",
                               center_label="节省 Token", value_key="saved_tokens")
     insights, recs = s.insights, s.recommendations
@@ -442,7 +442,7 @@ def generate_html_report(s):
     caveat_html = "".join(f"<li>{c}</li>" for c in s.caveats)
 
     # Skill 推荐板块（v0.9.2 支持联网搜索）
-    skill_recs = recommend_skills(s.by_type, s.n, use_online_search=args.online)
+    skill_recs = recommend_skills(s.by_type, s.n, use_online_search=use_online_search)
     skill_rec_html = format_recommendations_html(skill_recs)
 
     task_rows = ""

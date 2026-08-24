@@ -36,12 +36,16 @@ def _make_real_wb_root(tmp):
     sid = "2bb3ef57-38d3-423b-8272-f559f4fe679f"
     sess = traces_dir / sid
     sess.mkdir(parents=True, exist_ok=True)
+    # 使用昨天以确保在 7 天窗口内
+    from datetime import datetime, timedelta
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    yesterday_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     trace = {
         "trace": {
             "traceId": "trace_x",
             "name": "Agent workflow",
-            "startedAt": "2026-08-15T04:33:23.448Z",
-            "endedAt": "2026-08-15T04:36:21.121Z",
+            "startedAt": yesterday,
+            "endedAt": yesterday,
             "duration": 177673,                 # ms → 约 3 分钟
             "totalTokens": 3830904,
             "sessionId": sid,
@@ -51,7 +55,7 @@ def _make_real_wb_root(tmp):
         "spans": [],
     }
     (sess / "trace_x.json").write_text(json.dumps(trace, ensure_ascii=False), encoding="utf-8")
-    return Path(tmp)
+    return Path(tmp), yesterday_date
 
 
 @allure.feature("v0.9 真实宿主用量接入")
@@ -69,14 +73,14 @@ def _make_real_wb_root(tmp):
 @allure.description("复刻本机真实 trace 结构，确保 provider 递归子目录、读 trace.totalTokens/startedAt/duration。")
 @pytest.mark.smoke
 def test_v09_real_nested_trace_format():
-    root = _make_real_wb_root(tempfile.mkdtemp())
+    root, expected_date = _make_real_wb_root(tempfile.mkdtemp())
     recs = LocalProvider(root=root).fetch_recent(7)
     with allure.step("断言真实嵌套结构被正确解析"):
         attach_text(recs, "real-format records")
         assert len(recs) == 1
         r = recs[0]
         assert r.skill_tokens == 3830904, "应读 trace.totalTokens"
-        assert r.date == "2026-08-15", "应读 trace.startedAt 的日期部分"
+        assert r.date == expected_date, f"应读 trace.startedAt 的日期部分（expected: {expected_date}）"
         assert r.model == "hy3", "应读 trace.modelInfo.models[0]"
         assert r.skill_minutes == 3, "duration(ms) 应折算为约 3 分钟"
         assert r.session_id == "2bb3ef57-38d3-423b-8272-f559f4fe679f"
@@ -127,7 +131,7 @@ def test_v09_import_realformat_dryrun():
     json.dump({"tasks": []}, ledger)
     ledger.close()
     try:
-        provider = LocalProvider(root=_make_real_wb_root(tempfile.mkdtemp()))
+        provider = LocalProvider(root=_make_real_wb_root(tempfile.mkdtemp())[0])
         res = import_host_usage(ledger.name, days=7, provider=provider, apply=False,
                                 baseline_ratio=3.0)
         with allure.step("断言真实格式可读且 dry-run 安全"):

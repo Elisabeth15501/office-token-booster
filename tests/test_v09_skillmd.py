@@ -67,16 +67,16 @@ _FORBIDDEN_EXECUTOR_TRIGGERS = [
 @allure.label("priority", "P1")
 @allure.label("suite", "v0.9")
 @src_link("SKILL.md", line=1, name="SKILL.md 源码")
-@allure.title("v0.9 SKILL.md：name 不变 + version 0.9.0 + 描述含『洞察』")
+@allure.title("v0.9 SKILL.md：name 不变 + version 0.9.x + 描述含『洞察』")
 @allure.severity(allure.severity_level.CRITICAL)
-@allure.description("验证 name 仍为 office-token-booster、版本升到 0.9.0、描述体现 Option C 洞察定位。")
+@allure.description("验证 name 仍为 office-token-booster、版本 >= 0.9.0、描述体现 Option C 洞察定位。")
 @pytest.mark.smoke
 def test_v09_skillmd_metadata():
     text, fm = _load()
     with allure.step("断言 name / version / description"):
         attach_text(fm, "frontmatter")
         assert 'name: office-token-booster' in fm, "name 必须保持不变"
-        assert 'version: 0.9.0' in fm, "版本应升到 0.9.0"
+        assert 'version: 0.9' in fm, "版本应 >= 0.9.0（当前应为 0.9.3）"
         assert "洞察" in fm, "description 应体现『洞察』定位（Option C）"
         assert "办公室 Token 洞察与提效助手" in fm
 

@@ -20,9 +20,11 @@ class TestSkillHubClient:
 
     def test_search_result_structure(self):
         from skillhub_client import SearchResponse
-        assert hasattr(SearchResponse, "skills")
-        assert hasattr(SearchResponse, "total")
-        assert hasattr(SearchResponse, "query")
+        # 创建实例来检查字段（dataclass 字段不在类上）
+        resp = SearchResponse(skills=[], total=0, query="test")
+        assert hasattr(resp, "skills")
+        assert hasattr(resp, "total")
+        assert hasattr(resp, "query")
 
     def test_format_install_warning_contains_skill_name(self):
         from skillhub_client import SkillInfo, format_install_warning

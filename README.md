@@ -72,6 +72,16 @@ office-token-booster/
 │   ├── test_v06.py       # v0.6 实地测试：触发流高/中信心触发、非完成不触发、dry-run、确认后三层一致；
 │   │                     #   另含「产品 HTML 报告附件」「数据可信度护栏」两个作品集展示用例
 │   ├── test_v07.py       # v0.7 实地测试：断言真实用量事件 cost_source=event、写回采用宿主实测、三层一致、源码去品牌化
+│   ├── test_v08.py       # v0.8 实地测试：提效洞察可视化——趋势折线图、周期对比卡、ROI 优先级卡、QA 意图分支
+│   ├── test_v09_host_cost.py     # v0.9 宿主用量接入核心测试（10 例）
+│   ├── test_v09_host_cost_realformat.py  # v0.9 真实嵌套格式兼容测试（3 例）
+│   ├── test_v09_qa_consumption.py  # v0.9 QA 消费/节省意图路由测试（6 例）
+│   ├── test_v09_skillmd.py       # v0.9 SKILL.md 定位一致性测试（4 例）
+│   ├── test_v091_skill_recommender.py  # v0.9.1 Skill 推荐引擎测试（13 例）
+│   ├── test_v092_skillhub_client.py  # v0.9.2 SkillHub 客户端测试（3 例）
+│   ├── test_v093_clawhub_client.py   # v0.9.3 ClawHub 客户端测试（3 例）
+│   ├── test_boundary.py  # 边界/负向测试（17 例）：极端输入、畸形数据、空值降级
+│   ├── test_portability_cross_agent.py  # 跨 Agent 可移植性测试（14 例）：适配器协议、通用 provider
 │   ├── test_renderer.py  # 渲染器冒烟测试（L6）：内置最小 allure-results fixture → 断言产出 HTML 含用例名/状态/环境/分类
 │   └── helpers.py        # 测试共享辅助：账本读取、Allure 附件（JSON/TEXT/HTML）、Token 节省率图表
 ├── tools/
@@ -93,7 +103,7 @@ office-token-booster/
 
 ## 测试（pytest + Allure）
 
-测试套件覆盖 v0.5–v0.9 的核心能力，并强制守卫「确认消息 / 摘要报告 / 内核 Diagnosis 三层数字同源（误差 < 0.05pp）」与「触发默认 dry-run 不改账本」等不变量；另含 **17 个负向/边界测试**（`test_boundary.py`）专门验证极端输入、畸形数据与空值下的优雅降级。共 **57 个用例**（v0.5×3 + v0.6×7 + v0.7×7 + 渲染器×2 + 边界×17 + v0.8×8 + v0.9×13），全绿。三层一致测试改为**直接比对内核重算值**（不再靠正则抓文案），文案改动不会让测试误伤。
+测试套件覆盖 v0.5–v0.9.3 的核心能力，并强制守卫「确认消息 / 摘要报告 / 内核 Diagnosis 三层数字同源（误差 < 0.05pp）」与「触发默认 dry-run 不改账本」等不变量；另含 **17 个负向/边界测试**（`test_boundary.py`）专门验证极端输入、畸形数据与空值下的优雅降级。**14 个跨 Agent 可移植性测试**（`test_portability_cross_agent.py`）守卫宿主适配器协议与通用 JSON provider 的兼容性。共 **98 个用例**（v0.5×3 + v0.6×8 + v0.7×7 + 渲染器×2 + 边界×17 + v0.8×9 + v0.9×25 + v0.9.1×13 + v0.9.2×3 + v0.9.3×3 + 可移植×14），全绿。三层一致测试改为**直接比对内核重算值**（不再靠正则抓文案），文案改动不会让测试误伤。
 
 每个用例在报告里额外携带：
 
@@ -133,7 +143,11 @@ python -m pytest tests/ -v --alluredir=allure-results
 | v0.7 | `test_v07.py` | 真实用量 `cost_source=event`、文本成本回退 `text`、写回条目采用宿主实测、三层一致、源码去品牌化（防回归） |
 | 边界/负向 | `test_boundary.py` | 跨模块极端输入与畸形数据：空/None/负数/超大数/损坏 JSON/零基线/空账本等，验证「优雅降级不崩溃」；全维度打标（layer/test_type/component/risk_area/priority/suite） |
 | v0.8 | `test_v08.py` | 提效洞察可视化：趋势折线图（`build_trend_line_chart`）、本期 vs 上期周期对比（`compute_period_compare` / qa「比上周」意图）、按 ROI 排序的自动化优先级（`compute_roi_targets` / `ledger_agent.propose_automation_targets`）；单周数据降级为「周数据不足」友好提示；全维度打标 |
-| v0.9 | `test_v09_host_cost.py` ×9 + `test_v09_skillmd.py` ×4 | 真实宿主用量接入：`host_cost` 只读本机宿主 traces/db/usage-log（含 `EventCostProvider` / `LocalProvider` / `draft_entries_from_host`，容忍脏数据·超窗·无数据降级不崩）；触发流 `cost_provider` 补全实测成本且向后兼容 `None`；`ledger_agent.import_host_usage` dry-run 不写盘；SKILL.md 定位 Option C 一致性（禁止未实现执行器承诺、含 QUICKSTART 与「可选只读本机宿主用量」声明）；全维度打标 |
+| v0.9 | `test_v09_host_cost.py` ×10 + `test_v09_host_cost_realformat.py` ×3 + `test_v09_qa_consumption.py` ×6 + `test_v09_skillmd.py` ×4 | 真实宿主用量接入：`host_cost` 只读本机宿主 traces/db/usage-log（含 `EventCostProvider` / `LocalProvider` / `draft_entries_from_host`，容忍脏数据·超窗·无数据降级不崩）；触发流 `cost_provider` 补全实测成本且向后兼容 `None`；`ledger_agent.import_host_usage` dry-run 不写盘；SKILL.md 定位 Option C 一致性（禁止未实现执行器承诺、含 QUICKSTART 与「可选只读本机宿主用量」声明）；QA 消费/节省意图路由；全维度打标 |
+| v0.9.1 | `test_v091_skill_recommender.py` | Skill 推荐引擎：任务类型匹配（代码/对话/终端/周报）、优先级排序、格式化输出（MD/HTML）、空数据处理、最大推荐数限制；全维度打标 |
+| v0.9.2 | `test_v092_skillhub_client.py` | SkillHub 客户端：搜索接口返回结构校验、结果字段完整性、安装提示格式化含技能名 |
+| v0.9.3 | `test_v093_clawhub_client.py` | ClawHub 客户端：搜索接口返回结构校验、结果字段完整性、安装提示格式化含技能名 |
+| 可移植性 | `test_portability_cross_agent.py` | 跨 Agent 适配器协议：最小 Provider 满足接口、真实 Provider 均通过、跨 Agent 闭环、OpenAI 格式兼容、通用 JSON provider、优雅降级未知宿主、去重逻辑、CLI 参数校验 |
 
 > 每个用例都通过 `allure.feature/story/severity/description/step/attach` 在报告里给出可读的「做了什么、看到了什么」，方便非技术评审直接看懂。
 

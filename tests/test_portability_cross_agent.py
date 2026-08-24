@@ -234,12 +234,16 @@ def test_port_schema_tolerance_alternate_keys():
 @allure.description("第三主机只要导出 JSON/JSONL，GenericJsonProvider 即可解析为 CostRecord，无需专属代码。")
 @pytest.mark.smoke
 def test_port_generic_json_provider(tmp_path):
+    from datetime import datetime, timedelta
     export = tmp_path / "foreign_usage.json"
     # 模拟天禧导出的用法文件（混合字段形态：usage 嵌套 + 扁平 totalTokens）
+    # 使用昨天的日期以确保在 7 天窗口内
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    day_before = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
     export.write_text(json.dumps([
         {"usage": {"prompt_tokens": 1000, "completion_tokens": 500},
-         "model": "tianxi-gpt-x", "startedAt": "2026-08-15T10:00:00Z"},
-        {"totalTokens": 2000, "model": "tianxi-gpt-x", "startedAt": "2026-08-16T10:00:00Z"},
+         "model": "tianxi-gpt-x", "startedAt": yesterday},
+        {"totalTokens": 2000, "model": "tianxi-gpt-x", "startedAt": day_before},
     ], ensure_ascii=False), encoding="utf-8")
     recs = GenericJsonProvider(export).fetch_recent(7)
     with allure.step("断言第三方导出被正确解析"):
@@ -445,10 +449,14 @@ def test_port_dedup_by_session_id():
 @pytest.mark.smoke
 def test_cli_provider_generic_imports(tmp_path):
     """正对天禧/OpenClaw：第三方主机只要导出 JSON，CLI --provider generic 即可零代码导入。"""
+    from datetime import datetime, timedelta
     export = tmp_path / "foreign_usage.json"
+    # 使用昨天的日期以确保在 7 天窗口内
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    day_before = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
     export.write_text(json.dumps([
-        {"totalTokens": 1200, "model": "tianxi-gpt-x", "startedAt": "2026-08-16T10:00:00Z", "type": "周报生成"},
-        {"totalTokens": 3300, "model": "tianxi-gpt-x", "startedAt": "2026-08-17T11:00:00Z"},
+        {"totalTokens": 1200, "model": "tianxi-gpt-x", "startedAt": yesterday, "type": "周报生成"},
+        {"totalTokens": 3300, "model": "tianxi-gpt-x", "startedAt": day_before},
     ], ensure_ascii=False), encoding="utf-8")
     ledger = tmp_path / "ledger.json"
     ledger.write_text(json.dumps({"tasks": []}, ensure_ascii=False), encoding="utf-8")
