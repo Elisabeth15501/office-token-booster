@@ -28,6 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from skill_bridge import on_conversation_event  # noqa: E402
+from executor import resolve_exec_type, propose_ledger  # noqa: E402  # 方向 B 闭环
 
 
 def build_completion_event(task_text, *, skill_tokens=None, skill_minutes=None,
@@ -67,6 +68,31 @@ def on_task_completed(ledger_path, event, state):
     return res, (res.suggestion if res.triggered else "")
 
 
+def on_executor_completed(ledger_path, task_type, event, *, apply=False):
+    """方向 B 闭环：宿主用 executor 跑完一个办公任务后，把带真实用量的完成事件
+    直接记回 ledger——复用 v0.7 ``build_completion_event`` 的 cost 形态。
+
+    参数
+    ----
+    ledger_path : 账本 JSON 路径
+    task_type   : 任务类型（如「周报生成」，会先归一化）
+    event       : v0.7 完成事件 dict，可含 "cost"（{"skill_tokens":N,"skill_minutes":M}）
+                  与 "text"（用于备注）；与 executor.propose_ledger 同源护栏。
+    apply       : True 才真正写回（默认 dry-run 预览，不污染账本）
+
+    返回
+    ----
+    ledger_agent.run_long_chain 的结果 dict；ledger_agent 不可用时返回 None。
+    """
+    std_type = resolve_exec_type(task_type) or task_type
+    return propose_ledger(
+        ledger_path, std_type,
+        cost=(event or {}).get("cost"),
+        note=(event or {}).get("text") or f"执行引擎：{std_type}",
+        apply=apply,
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="办公室提效 · v0.7 宿主钩子示例（演示真实用量自动记账）")
@@ -74,7 +100,12 @@ def main():
     parser.add_argument("--ledger", dest="ledger", help="账本 JSON 路径（同位置参数）")
     parser.add_argument("--demo", action="store_true",
                         help="用内置样本账本演示宿主完成事件如何触发记账建议")
+    parser.add_argument("--demo-exec", action="store_true",
+                        help="方向 B 演示：executor 跑完周报 → 带真实用量事件自动记回账本（dry-run）")
     args = parser.parse_args()
+
+    if args.demo_exec:
+        return _demo_executor_completed()
 
     if args.demo:
         sample = {"tasks": [
@@ -120,6 +151,46 @@ def main():
     if args.demo:
         import os
         os.unlink(ledger)
+    return 0
+
+
+def _demo_executor_completed() -> int:
+    """方向 B 闭环演示：executor 跑周报 → 带真实用量事件自动记回（dry-run 不写盘）。"""
+    from executor import execute
+
+    sample_weekly = (
+        "本周概览：方向 B 执行引擎落地\n"
+        "完成 executor 骨架与 5 个模块\n"
+        "风险：回归覆盖待补充\n"
+        "下周计划：补 docx/xlsx 导出"
+    )
+    md, meta = execute("周报生成", sample_weekly)
+    print("=== 方向 B：executor 生成周报交付物 ===")
+    print(md)
+    print(f"[元信息] 字符数={meta['chars']}")
+
+    # 宿主回报的完成事件（含真实用量），复用 v0.7 build_completion_event 形态
+    event = build_completion_event(
+        "我刚用执行引擎生成了周报", skill_tokens=1800, skill_minutes=5, completed=True)
+
+    ledger = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
+    json.dump({"tasks": []}, ledger, ensure_ascii=False)
+    ledger.close()
+    try:
+        print("\n=== 方向 B：executor 完成 → 自动记回账本（dry-run）===")
+        res = on_executor_completed(ledger.name, "周报生成", event, apply=False)
+        if res is None:
+            print("[记账] ledger_agent 不可用，跳过。")
+        elif res.get("blocked"):
+            print(f"[记账] 已拦截：{res.get('reason')}（请补填 baseline 后确认写回）")
+        else:
+            entry = res.get("entry", {})
+            print(f"[记账] 预览：类型={res.get('pending_type') or entry.get('type')} "
+                  f"skill_tokens={entry.get('skill_tokens')} "
+                  f"skill_minutes={entry.get('skill_minutes')}（确认后加 --confirm 写回）")
+    finally:
+        import os
+        os.unlink(ledger.name)
     return 0
 
 
