@@ -103,11 +103,11 @@ metadata:
 
 ## 能做什么（真实范围）
 
-本技能**既执行、又度量**。下列能力均已落地（112 测试全绿）：
+本技能**既执行、又度量**。下列能力均已落地（118 测试全绿）：
 
 | 能力 | 输入 | 产出 |
 |------|------|------|
-| 任务执行（方向 B） | 原始内容（本周要点 / 转录 / CSV / 长文 / 主题） | 结构化可交付物（Markdown，可选 HTML）+ 执行后自动记账建议 |
+| 任务执行（方向 B） | 原始内容（本周要点 / 转录 / CSV / 长文 / 主题） | 结构化可交付物（Markdown，可选 HTML / docx / xlsx）+ 执行后自动记账建议 |
 | 提效账本 | 任务记录 JSON（`baseline` 笨办法估计 vs `skill` 实际 AI 成本） | MD / HTML 提效报告（节省 Token、耗时、率、趋势） |
 | Token 洞察可视化 | 账本 | 环形图 + 趋势折线图 + 本期 vs 上期对比卡 + 自动化 ROI Top N 卡 |
 | 对话式诊断 | 账本 + 自然语言追问 | 锚定内核的结构化回答（类型排名 / 最差场景 / 周趋势 / 周期对比 / 可信度） |
@@ -339,15 +339,21 @@ python scripts/executor.py --type 会议纪要 --input 转录.txt --output 纪�
 # 数据分析：本地算指标（不联网）
 python scripts/executor.py --type 数据分析 --input data.csv --output 分析.md
 
+# 可选导出：周报 → Word、数据分析 → Excel（缺失 python-docx / openpyxl 时自动降级为 md / csv，零依赖默认不受影响）
+python scripts/executor.py --type 周报生成 --input 本周要点.txt --output 周报 --format docx
+python scripts/executor.py --type 数据分析 --input data.csv --output 分析 --format xlsx
+
 # 执行完自动记账：把这笔任务的实测成本记回账本（缺 baseline 会被护栏拦截，提示补填）
 python scripts/executor.py --type 周报生成 --input 本周要点.txt \
     --apply-ledger ledger.json --skill-tokens 1800 --skill-minutes 5
 #   加 --confirm-ledger 才真正写回；否则仅 dry-run 预览
 ```
 
+> **导出说明（优雅降级）**：`--format docx/xlsx` 为**可选依赖**（python-docx / openpyxl），不计入技能的核心零依赖默认。未安装时自动降级——docx 回落 Markdown、xlsx 回落 CSV，功能不中断。安装见 `requirements-optional.txt`。
+
 > 闭环设计：执行产出后调用 `ledger_agent.run_long_chain` 自动建议记账，**复用 P0 写回护栏**——未补「笨办法」baseline 时拒绝写回，不污染账本。这样「做」和「记」合成一步，省了多少自动可复盘。
 
-宿主技能侧集成（天禧 / OpenClaw 皆可）：用户说「帮我写周报」→ 宿主把原始要点交给 `executor.execute("周报生成", text)` 拿到 Markdown → 渲染给用户，并带 `event["cost"]` 调 `propose_ledger` 记回。
+宿主技能侧集成（天禧 / OpenClaw 皆可）：用户说「帮我写周报」→ 宿主把原始要点交给 `executor.execute("周报生成", text)` 拿到 Markdown → 渲染给用户，并带 `event["cost"]` 调 `propose_ledger` 记回。宿主钩子 `scripts/host_hook.py` 提供 `on_executor_completed(ledger_path, task_type, event, apply)`，把 `executor` 完成事件里的真实用量（`event["cost"]` 中的 `skill_tokens/skill_minutes`）直接记回 ledger，与 v0.7 宿主完成事件形态一致，无需重复写对接代码。
 
 ## 设计与合规
 
