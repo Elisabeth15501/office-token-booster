@@ -14,8 +14,22 @@
 
 from __future__ import annotations
 
+import html as _html
 from dataclasses import dataclass, field
 from typing import Optional
+
+# P2 安全：所有进 HTML 的字段（含联网搜来的 skill 名/描述/标签）必须转义；
+# URL 仅允许 http/https，杜绝 javascript: 等协议注入。
+_esc = _html.escape
+
+
+def _safe_url(u):
+    if not u:
+        return ""
+    u = str(u).strip()
+    if u.lower().startswith(("http://", "https://")):
+        return _esc(u)
+    return ""  # 非 http(s) 不渲染为链接，防 XSS
 
 
 @dataclass
@@ -333,8 +347,8 @@ def format_recommendations_html(recommendations: list[SkillRecommendation]) -> s
             info = rec.skillhub_info
             stars = info.get('stars', 0)
             installs = info.get('installs', 0)
-            desc = info.get('description', '')[:80] + '...' if info.get('description') else '暂无描述'
-            tags_html = ''.join(f"<span style='background:#e5e7eb;padding:2px 6px;border-radius:4px;font-size:11px;margin-right:4px'>{t}</span>" for t in info.get('tags', [])[:5])
+            desc = _esc(info.get('description', '')[:80] + '...') if info.get('description') else '暂无描述'
+            tags_html = ''.join(f"<span style='background:#e5e7eb;padding:2px 6px;border-radius:4px;font-size:11px;margin-right:4px'>{_esc(t)}</span>" for t in info.get('tags', [])[:5])
 
             hub_info_html = f"""
             <div style="margin-top:8px;padding:8px;background:#f0f9ff;border-radius:6px;font-size:12px;">
@@ -342,22 +356,22 @@ def format_recommendations_html(recommendations: list[SkillRecommendation]) -> s
               <div style="color:#475569;">⭐{stars} | {installs} 安装</div>
               <div style="color:#64748b;margin-top:4px;">{desc}</div>
               {f'<div style="margin-top:6px;">{tags_html}</div>' if info.get('tags') else ''}
-              {f'<div style="margin-top:4px;"><a href="{info["homepage"]}" target="_blank" style="color:#2563eb;font-size:11px;">查看仓库</a></div>' if info.get('homepage') else ''}
+              {f'<div style="margin-top:4px;"><a href="{_safe_url(info["homepage"])}" target="_blank" style="color:#2563eb;font-size:11px;">查看仓库</a></div>' if info.get('homepage') else ''}
             </div>"""
 
         card = f"""
     <div class="rec-card" style="border-left: 4px solid {priority_color}; margin: 12px 0; padding: 14px; background: #f9fafb; border-radius: 8px;">
-      <div style="font-weight: 700; font-size: 16px; margin-bottom: 8px;">{priority_emoji} {rec.skill}</div>
-      <div style="font-size: 13px; color: var(--fg); margin-bottom: 6px;">{rec.reason}</div>
-      <div style="font-size: 13px; color: var(--accent); font-weight: 600; margin-bottom: 6px;">预期节省：{rec.expected_saving}</div>
+      <div style="font-weight: 700; font-size: 16px; margin-bottom: 8px;">{priority_emoji} {_esc(rec.skill)}</div>
+      <div style="font-size: 13px; color: var(--fg); margin-bottom: 6px;">{_esc(rec.reason)}</div>
+      <div style="font-size: 13px; color: var(--accent); font-weight: 600; margin-bottom: 6px;">预期节省：{_esc(rec.expected_saving)}</div>
       {hub_info_html}
       <div style="margin-top:12px;padding:10px;background:#fff7ed;border-radius:6px;border:1px solid #fed7aa;">
         <div style="font-size:12px;font-weight:600;color:#9a3412;margin-bottom:6px;">⚠️ 安装确认</div>
         <div style="font-size:12px;color:#7c2d12;margin-bottom:6px;">请确认无误后，手动运行以下命令安装：</div>
-        <pre style="background:#f3f4f6;padding:8px;border-radius:4px;overflow-x:auto;font-size:11px;"><code style="color:#111827;">{rec.install_cmd}</code></pre>
+        <pre style="background:#f3f4f6;padding:8px;border-radius:4px;overflow-x:auto;font-size:11px;"><code style="color:#111827;">{_esc(rec.install_cmd)}</code></pre>
         <div style="font-size:11px;color:#9a3412;margin-top:6px;">🛡️ 安全提示：安装 Skill 会修改你的 <code>.workbuddy/</code> 目录。如需回滚，可手动删除对应目录。</div>
       </div>
-      {'<div style="font-size: 11px; color: var(--muted); margin-top: 6px;">来源：<a href="' + rec.evidence_url + '" target="_blank">' + rec.evidence_url + '</a></div>' if rec.evidence_url else ''}
+      {f'<div style="font-size: 11px; color: var(--muted); margin-top: 6px;">来源：<a href="{_safe_url(rec.evidence_url)}" target="_blank">{_esc(rec.evidence_url)}</a></div>' if _safe_url(rec.evidence_url) else ''}
     </div>"""
         cards.append(card)
 

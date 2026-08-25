@@ -42,6 +42,10 @@ import sys
 import unicodedata
 from pathlib import Path
 from diagnose import format_number, load_ledger, diagnose, Diagnosis, _safe_div
+
+import html as _html
+# P2 安全：所有进 HTML 的用户字段必须经此转义，杜绝 <script> 等注入。
+_esc = _html.escape
 from skill_recommender import recommend_skills, format_recommendations_md, format_recommendations_html
 
 
@@ -105,7 +109,7 @@ def build_donut_chart(stats, title="节省 Token 占比（按任务类型）",
         legend.append(
             f'            <div class="legend-item">'
             f'<span class="swatch" style="background:{color}"></span>'
-            f'{s["task_type"]}：{pct:.1f}%'
+            f'{_esc(s["task_type"])}：{pct:.1f}%'
             f'<span class="pct">（{format_number(s.get(value_key, 0))}{unit}）</span></div>'
         )
         cum += seg_len
@@ -178,11 +182,11 @@ def build_trend_line_chart(weeks, value_key="saved_tokens", title="按周节省 
     area_pts = f"{pad_l},{pad_t + plot_h} " + line_pts + f" {xs[-1]:.1f},{pad_t + plot_h}"
     dots = "".join(
         f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.5" fill="var(--accent)" '
-        f'stroke="var(--bg)" stroke-width="1.5"><title>{wk}: {format_number(v)}</title></circle>'
+        f'stroke="var(--bg)" stroke-width="1.5"><title>{_esc(wk)}: {format_number(v)}</title></circle>'
         for (wk, v), x, y in zip(pts, xs, ys))
     xlabels = "".join(
         f'<text x="{x:.1f}" y="{H - 10}" text-anchor="middle" font-size="10" '
-        f'style="fill:var(--muted)">{wk.replace("2026-", "W").replace("2025-", "W")}</text>'
+        f'style="fill:var(--muted)">{_esc(wk.replace("2026-", "W").replace("2025-", "W"))}</text>'
         for (wk, _), x in zip(pts, xs))
 
     return f"""    <div class="chart-line">
@@ -230,7 +234,7 @@ def build_roi_card(roi_targets, top_n=3):
     items = []
     for t in roi_targets[:top_n]:
         items.append(
-            f'<li><b>{t["task_type"]}</b> — ROI≈{t["roi_score"]} '
+            f'<li><b>{_esc(t["task_type"])}</b> — ROI≈{t["roi_score"]} '
             f'（预估月省 {format_number(t["monthly_saved_tokens"])} Token，'
             f'接入约 {t["effort_hours"]} 人时）</li>')
     return f"""
@@ -421,7 +425,7 @@ def generate_html_report(s, *, use_online_search=False):
     max_tok = max((d["baseline_tokens"] for d in s.by_type), default=1) or 1
     for d in s.by_type:
         type_rows += (
-            f'<tr><td>{d["task_type"]}</td><td>{d["count"]}</td>'
+            f'<tr><td>{_esc(d["task_type"])}</td><td>{d["count"]}</td>'
             f'<td>{format_number(d["baseline_tokens"])}</td><td>{format_number(d["skill_tokens"])}</td>'
             f'<td>{format_number(d["saved_tokens"])}</td><td>{format_number(d["saved_minutes"])}</td>'
             f'<td>{d["token_save_pct"]:.1f}%</td></tr>'
@@ -429,7 +433,7 @@ def generate_html_report(s, *, use_online_search=False):
 
     week_rows = ""
     for w in s.by_week:
-        week_rows += (f'<tr><td>{w["week"]}</td><td>{w["count"]}</td>'
+        week_rows += (f'<tr><td>{_esc(w["week"])}</td><td>{w["count"]}</td>'
                       f'<td>{format_number(w["baseline_tokens"])}</td><td>{format_number(w["skill_tokens"])}</td>'
                       f'<td>{format_number(w["saved_tokens"])}</td></tr>')
 
@@ -437,9 +441,9 @@ def generate_html_report(s, *, use_online_search=False):
     compare_card = build_compare_card(s.period_compare)
     roi_card = build_roi_card(s.roi_targets)
 
-    insight_html = "".join(f"<li>{x}</li>" for x in insights)
-    rec_html = "".join(f"<li>{x}</li>" for x in recs)
-    caveat_html = "".join(f"<li>{c}</li>" for c in s.caveats)
+    insight_html = "".join(f"<li>{_esc(x)}</li>" for x in insights)
+    rec_html = "".join(f"<li>{_esc(x)}</li>" for x in recs)
+    caveat_html = "".join(f"<li>{_esc(c)}</li>" for c in s.caveats)
 
     # Skill 推荐板块（v0.9.2 支持联网搜索）
     skill_recs = recommend_skills(s.by_type, s.n, use_online_search=use_online_search)
@@ -451,7 +455,7 @@ def generate_html_report(s, *, use_online_search=False):
         st = t.get("skill_tokens", 0) or 0
         bm = t.get("baseline_minutes", 0) or 0
         sm = t.get("skill_minutes", 0) or 0
-        task_rows += (f'<tr><td>{t.get("date","")}</td><td>{t.get("type","")}</td>'
+        task_rows += (f'<tr><td>{_esc(t.get("date",""))}</td><td>{_esc(t.get("type",""))}</td>'
                       f'<td>{bm}</td><td>{sm}</td><td>{bm-sm}</td>'
                       f'<td>{format_number(bt)}</td><td>{format_number(st)}</td>'
                       f'<td>{format_number(bt-st)}</td></tr>')
@@ -610,9 +614,9 @@ def generate_html_summary(s):
     donut = build_donut_chart(s.by_type, title="各任务类型 节省 Token 占比",
                               center_label="节省 Token", value_key="saved_tokens")
     top = s.by_type[0] if s.by_type else None
-    top_html = (f"「{top['task_type']}」：{top['count']} 次共省 {format_number(top['saved_tokens'])} Token"
+    top_html = (f"「{_esc(top['task_type'])}」：{top['count']} 次共省 {format_number(top['saved_tokens'])} Token"
                 f"（省 {top['token_save_pct']:.1f}%）") if top else "暂无任务类型数据"
-    conclusion = s.insights[0] if s.insights else "暂无数据。"
+    conclusion = _esc(s.insights[0]) if s.insights else "暂无数据。"
     trend_chart = build_trend_line_chart(s.by_week)
     compare_card = build_compare_card(s.period_compare)
     roi_card = build_roi_card(s.roi_targets)
@@ -622,7 +626,7 @@ def generate_html_summary(s):
 
     if s.caveats:
         cred_html = ('<p style="color:var(--muted)">节省值基于你填写的基准估计，以下提示用于校验「提效」声称的可信度：</p>'
-                     '<ul>' + "".join(f"<li>⚠️ {c}</li>" for c in s.caveats) + "</ul>")
+                     '<ul>' + "".join(f"<li>⚠️ {_esc(c)}</li>" for c in s.caveats) + "</ul>")
     else:
         cred_html = '<p style="color:var(--muted)">基线为你的估计参照，非计费实测；当前未发现明显异常。</p>'
 

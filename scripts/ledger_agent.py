@@ -287,6 +287,21 @@ def run_long_chain(ledger_path, task_type, *, apply=False, date=None,
                                 skill_tokens=skill_tokens, skill_minutes=skill_minutes,
                                 baseline_tokens=baseline_tokens, baseline_minutes=baseline_minutes,
                                 note=note)
+    # P0 护栏（质量门禁）：baseline 缺省（非用户显式 0）且会产生负节省时，
+    # 拒绝写回——避免「baseline=0/skill=3000」污染账本、拉偏历史均值。
+    _baseline_estimated = "baseline_tokens" in meta.get("estimated_fields", [])
+    if apply and _baseline_estimated and entry["skill_tokens"] > 0:
+        return {
+            "old_diag": old_diag, "entry": entry, "meta": meta,
+            "new_diag": old_diag, "ledger_path": ledger_path,
+            "applied": False, "backup_path": None, "blocked": True,
+            "block_reason": (
+                f"类型「{task_type}」缺少真实手搓 baseline（baseline_tokens 未提供且账本无历史），"
+                f"写回会产生负节省、污染账本。请补填 --baseline-tokens 后重试，"
+                f"例如「记一笔 {task_type} 花了{entry['skill_tokens']} token "
+                f"{entry['skill_minutes']}分钟，手搓要<你的估算> token」。"),
+        }
+
     new_ledger, bak = append_entry(ledger_path, entry, backup=True, dry_run=not apply)
     new_diag = diagnose(new_ledger["tasks"])
     return {
@@ -407,6 +422,10 @@ def main():
                          skill_tokens=args.skill_tokens, skill_minutes=args.skill_minutes,
                          baseline_tokens=args.baseline_tokens,
                          baseline_minutes=args.baseline_minutes, note=args.note)
+    if res.get("blocked"):
+        print("⚠️ " + res["block_reason"])
+        print("（本次未写入账本。）")
+        return 0
     entry, meta = res["entry"], res["meta"]
     old_d, new_d = res["old_diag"], res["new_diag"]
 

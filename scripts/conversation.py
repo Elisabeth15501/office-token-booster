@@ -152,11 +152,11 @@ def _detect_type(text, diag):
     return None, False
 
 
-# 确认意图识别（修复 H2）：
-# - 仅接受带边界的确认短语，避免单字『行』命中『流行』、『可以』命中疑问句；
+# 确认意图识别（修复 H2 + P1 质量门禁）：
+# - 仅接受强确认词，移除『好的/可以/行』等宽词，避免『好的，记一笔…』被误判为 confirm；
 # - 否定/疑问语境（不…确定 / 可以吗 / 行不行 …）一律排除。
 _CONFIRM_RE = re.compile(
-    r"(好的|确认|我同意|同意|记吧|写吧|没问题|就这样|可以|确定|行吧|行的|行，)"
+    r"(确认|我同意|同意|记吧|写吧|没问题|就这样|确定)"
     r"|^\s*行[\s，。！,.!？?]*$",
     re.I,
 )
@@ -187,17 +187,7 @@ def classify(text):
         return "exit"
     if re.search(r"(取消|不算了|不要记|别记|false|撤销)", t, re.I):
         return "cancel"
-    # 确认意图：用带边界的确认词 + 否定/疑问排除（修复 H2 误判）
-    # 『这个行业报告可以吗？』『我不确定』『流行方案』不再被误判为 confirm。
-    if _CONFIRM_RE.search(t) and not _NEG_RE.search(t):
-        return "confirm"
-    if re.search(r"(完整报告|详细报告|九段|生成报告|全部明细|看报告)", t):
-        return "report_full"
-    if re.search(r"(摘要|一页|总结一下|概览|看下概况|概括)", t):
-        return "report_summary"
-    if re.search(r"(待自动化|哪些值得|自动化建议|该自动化|targets)", t, re.I):
-        return "targets"
-    # 显式记账词
+    # 显式记账词优先于确认（P1 修复：『好的，记一笔…』必须归 record，不被确认词吞）
     if re.search(r"(记一笔|记录|记账|记一下|记上|登记|添加任务|新增任务|记下来|写进账本)", t):
         return "record"
     # 被动完成信号：既说「完成了某任务」又给出成本数字 → 自动建议记账
@@ -205,6 +195,15 @@ def classify(text):
     if (re.search(r"(花了|用了|耗时|花费|消耗|占)\s*.{0,12}?\s*(token|分钟|分)", t, re.I)
             and _COMPLETION_VERBS_RE.search(t)):
         return "record"
+    if re.search(r"(完整报告|详细报告|九段|生成报告|全部明细|看报告)", t):
+        return "report_full"
+    if re.search(r"(摘要|一页|总结一下|概览|看下概况|概括)", t):
+        return "report_summary"
+    if re.search(r"(待自动化|哪些值得|自动化建议|该自动化|targets)", t, re.I):
+        return "targets"
+    # 确认意图：用强确认词 + 否定/疑问排除（P1 已收窄，移除宽词）
+    if _CONFIRM_RE.search(t) and not _NEG_RE.search(t):
+        return "confirm"
     return "followup"
 
 
@@ -245,6 +244,9 @@ def handle(ledger_path, text, state):
             note=pending.get("note"),
         )
         state["pending"] = None
+        if res.get("blocked"):
+            return ("⚠️ " + res["block_reason"] + " 这次未写入账本。你可以重新记账并带上基准成本，"
+                    "例如：「记一笔 周报生成 花了1800 token 5分钟，手搓要12000 token 25分钟」。")
         new_d = res["new_diag"]
         msg = (f"[已记录] {pending['type']}。当前共 {new_d.n} 条任务，"
                f"累计节省 {format_number(new_d.saved_tok)} Token"

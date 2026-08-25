@@ -302,12 +302,18 @@ def test_v06_classify_confirm_no_false_positive():
             {b: classify(b) for b in ["这个行业报告可以吗？", "我不确定", "流行方案", "这个方案行吗"]},
             "易误判句意图分布")
 
-    with allure.step("正常确认词仍判为 confirm"):
-        for good in ["确认", "可以", "行", "没问题", "就这样"]:
+    with allure.step("正常确认词仍判为 confirm（已收窄为强确认词）"):
+        # 注：『可以』已从确认词移除（避免『可以吗』等疑问句误判），属 P1 质量门禁的
+        # 预期行为变更；『行』单独成句仍判 confirm（行首边界分支）。
+        for good in ["确认", "行", "没问题", "就这样"]:
             assert classify(good) == "confirm", f"未识别为 confirm: {good!r}"
         attach_text(
-            {g: classify(g) for g in ["确认", "可以", "行", "没问题", "就这样"]},
+            {g: classify(g) for g in ["确认", "行", "没问题", "就这样"]},
             "正常确认词意图分布")
+
+    with allure.step("收窄验证：『可以』单独不再判 confirm（P1 门禁）"):
+        assert classify("可以") != "confirm", "『可以』已从确认词移除，避免疑问句误判"
+        attach_text({"可以": classify("可以")}, "收窄后中性确认词")
 
 
 if __name__ == "__main__":
