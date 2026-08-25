@@ -16,13 +16,14 @@ from __future__ import annotations
 import argparse
 import csv
 import html
+import importlib
 import io
 import json
 import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # 任务类型归一（复用类型字典；缺失则退化为直匹配）
@@ -329,11 +330,22 @@ def execute(task_type: str, text: str) -> tuple[str, dict]:
 # 自动记账闭环（复用 ledger_agent 护栏）
 # ---------------------------------------------------------------------------
 def propose_ledger(ledger_path: str, task_type: str,
+                   cost: Optional[dict] = None,
                    skill_tokens: Optional[int] = None,
                    skill_minutes: Optional[int] = None,
                    note: Optional[str] = None,
                    apply: bool = False) -> Optional[dict]:
-    """执行完后把这笔账记回 ledger。baseline 由用户后续补（护栏会拦截缺省写回）。"""
+    """执行完后把这笔账记回 ledger。
+
+    cost 为宿主完成事件的用量字典 {"skill_tokens": N, "skill_minutes": M}
+    （复用 v0.7 build_completion_event 形态）；显式传入的 skill_tokens/
+    skill_minutes 优先于 cost 字典。baseline 由用户后续补（护栏会拦截缺省写回）。
+    """
+    if cost:
+        if skill_tokens is None:
+            skill_tokens = cost.get("skill_tokens")
+        if skill_minutes is None:
+            skill_minutes = cost.get("skill_minutes")
     try:
         from ledger_agent import run_long_chain
     except Exception:
@@ -382,6 +394,181 @@ def _md_to_html(md: str, title: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# 可选富格式导出（docx / xlsx）—— 可选依赖，缺失则优雅降级，不破坏零依赖默认
+# ---------------------------------------------------------------------------
+def _try_import(module_name: str):
+    """延迟导入可选第三方库；缺失返回 None（调用方据此降级）。"""
+    try:
+        return importlib.import_module(module_name)
+    except Exception:  # pragma: no cover - 依赖缺失时走降级分支
+        return None
+
+
+def _strip_bold(s: str) -> str:
+    """去掉 Markdown 粗体标记（docx/xlsx 不渲染 **）。"""
+    return s.replace("**", "")
+
+
+def _is_table_sep(s: str) -> bool:
+    """判定一行是否为 Markdown 表格分隔行（|---|---|）。"""
+    core = s.replace("|", "").replace("-", "").replace(":", "")
+    return core.strip() == ""
+
+
+def _parse_md_blocks(md: str):
+    """把本引擎产出的 Markdown 切成块，供 docx/xlsx 复用。
+
+    块形态：('h1'|'h2'|'h3'|'p'|'quote'|'ul'|'table', payload)。
+    - ul 的 payload 为字符串列表；table 的 payload 为二维列表（含表头，分隔行已跳过）。
+    """
+    blocks = []
+    lines = md.splitlines()
+    i = 0
+    while i < len(lines):
+        s = lines[i].strip()
+        if not s:
+            i += 1
+            continue
+        if s.startswith("|"):
+            tbl: list[list[str]] = []
+            while i < len(lines) and lines[i].strip().startswith("|"):
+                row_str = lines[i].strip()
+                if _is_table_sep(row_str):
+                    i += 1
+                    continue
+                tbl.append([c.strip() for c in row_str.strip("|").split("|")])
+                i += 1
+            if tbl:
+                blocks.append(("table", tbl))
+            continue
+        if s.startswith("# "):
+            blocks.append(("h1", s[2:].strip()))
+        elif s.startswith("## "):
+            blocks.append(("h2", s[3:].strip()))
+        elif s.startswith("### "):
+            blocks.append(("h3", s[4:].strip()))
+        elif s.startswith("- "):
+            items: list[str] = []
+            while i < len(lines) and lines[i].strip().startswith("- "):
+                items.append(lines[i].strip()[2:])
+                i += 1
+            blocks.append(("ul", items))
+            continue
+        elif s.startswith("> "):
+            blocks.append(("quote", s[2:].strip()))
+        else:
+            blocks.append(("p", s))
+        i += 1
+    return blocks
+
+
+def _replace_ext(path: str, ext: str) -> str:
+    return str(Path(path).with_suffix(ext))
+
+
+def _md_to_csv(md: str, csv_path: str) -> None:
+    """xlsx 缺失时的零依赖降级：把 Markdown（含表格）写成 CSV。"""
+    rows: list[list[str]] = []
+    for kind, payload in _parse_md_blocks(md):
+        if kind == "table":
+            for r in payload:
+                rows.append([_strip_bold(c) for c in r])
+        elif kind == "ul":
+            for it in payload:
+                rows.append([_strip_bold(it)])
+        else:
+            text = _strip_bold(payload if isinstance(payload, str) else " ".join(payload))
+            rows.append([text])
+    with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
+        csv.writer(f).writerows(rows)
+
+
+def export_docx(md: str, out_path: str, title: str) -> Tuple[str, str]:
+    """导出为 .docx（需可选依赖 python-docx）。
+
+    返回 (实际写出路径, 状态)。python-docx 缺失时降级为同路径 .md，
+    状态以 'degraded:' 开头；否则状态为 'ok'。
+    """
+    if _try_import("docx") is None:
+        md_path = _replace_ext(out_path, ".md")
+        Path(md_path).write_text(md, encoding="utf-8")
+        return md_path, "degraded:docx-lib-missing"
+    from docx import Document
+
+    doc = Document()
+    if title:
+        doc.core_properties.title = title
+    for kind, payload in _parse_md_blocks(md):
+        if kind == "h1":
+            doc.add_heading(_strip_bold(payload), level=1)
+        elif kind == "h2":
+            doc.add_heading(_strip_bold(payload), level=2)
+        elif kind == "h3":
+            doc.add_heading(_strip_bold(payload), level=3)
+        elif kind == "p":
+            doc.add_paragraph(_strip_bold(payload))
+        elif kind == "quote":
+            doc.add_paragraph(_strip_bold(payload), style="Intense Quote")
+        elif kind == "ul":
+            for it in payload:
+                doc.add_paragraph(_strip_bold(it), style="List Bullet")
+        elif kind == "table":
+            t = doc.add_table(rows=1, cols=len(payload[0]))
+            try:
+                t.style = "Light Grid Accent 1"
+            except Exception:  # pragma: no cover - 样式名随 Word 版本变化
+                pass
+            hdr = t.rows[0].cells
+            for j, c in enumerate(payload[0]):
+                hdr[j].text = _strip_bold(c)
+            for r in payload[1:]:
+                cells = t.add_row().cells
+                for j, c in enumerate(r):
+                    cells[j].text = _strip_bold(c)
+    doc.save(out_path)
+    return out_path, "ok"
+
+
+def export_xlsx(md: str, out_path: str, title: str) -> Tuple[str, str]:
+    """导出为 .xlsx（需可选依赖 openpyxl）。
+
+    叙事内容进「内容」sheet，每个 Markdown 表格进独立的「表N」sheet。
+    openpyxl 缺失时降级为同路径 .csv（零依赖），状态以 'degraded:' 开头。
+    """
+    if _try_import("openpyxl") is None:
+        csv_path = _replace_ext(out_path, ".csv")
+        _md_to_csv(md, csv_path)
+        return csv_path, "degraded:xlsx-lib-missing"
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    content = wb.active
+    content.title = "内容"
+    if title:
+        content.append([title])
+    table_idx = 0
+    for kind, payload in _parse_md_blocks(md):
+        if kind == "table":
+            table_idx += 1
+            ws = wb.create_sheet(title=f"表{table_idx}")
+            for r in payload:
+                ws.append([_strip_bold(c) for c in r])
+        elif kind in ("h1", "h2", "h3"):
+            content.append([_strip_bold(payload)])
+        elif kind == "ul":
+            for it in payload:
+                content.append([_strip_bold(it)])
+        else:
+            text = _strip_bold(payload if isinstance(payload, str) else " ".join(payload))
+            content.append([text])
+    wb.save(out_path)
+    return out_path, "ok"
+
+
+FORMATS = ("md", "html", "docx", "xlsx")
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 def _read_input(src: str) -> str:
@@ -398,11 +585,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="office-token-booster 执行引擎")
     ap.add_argument("--type", required=True, help="任务类型（周报生成/会议纪要/数据分析/文档整理/PPT大纲）")
     ap.add_argument("--input", required=True, help="输入：文件路径、-（stdin）、或直接文本")
-    ap.add_argument("--output", help="输出 Markdown/HTML 路径（缺省打印到 stdout）")
-    ap.add_argument("--html", action="store_true", help="输出 HTML 而非 Markdown")
+    ap.add_argument("--output", help="输出路径（缺省打印到 stdout；docx/xlsx 必须指定）")
+    ap.add_argument("--format", choices=FORMATS, default="md",
+                    help="输出格式：md（默认）/ html / docx / xlsx；docx/xlsx 需可选依赖，缺失自动降级")
     ap.add_argument("--apply-ledger", help="执行后自动记回的 ledger.json 路径")
     ap.add_argument("--skill-tokens", type=int, help="本次执行实测消耗的 Token（来自宿主 event 或自估）")
     ap.add_argument("--skill-minutes", type=int, help="本次执行耗时（分钟）")
+    ap.add_argument("--cost-json", help="宿主完成事件的 cost JSON，如 '{\"skill_tokens\":1800,\"skill_minutes\":5}'，自动合并进记账")
     ap.add_argument("--note", help="记账备注")
     ap.add_argument("--confirm-ledger", action="store_true", help="与 --apply-ledger 同用，真正写回（否则仅预览）")
     args = ap.parse_args(argv)
@@ -414,26 +603,42 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     text = _read_input(args.input)
     md, meta = execute(std_type, text)
+    title = f"{std_type} · {_today_iso()}"
 
-    if args.html:
-        rendered = _md_to_html(md, f"{std_type} · {_today_iso()}")
-        ext = ".html"
+    # 富格式导出（docx / xlsx）需指定 --output
+    if args.format in ("docx", "xlsx"):
+        if not args.output:
+            print("[错误] --format docx/xlsx 需要配合 --output 指定输出路径", file=sys.stderr)
+            return 2
+        if args.format == "docx":
+            actual, status = export_docx(md, args.output, title)
+        else:
+            actual, status = export_xlsx(md, args.output, title)
+        if status.startswith("degraded"):
+            print(f"[完成·降级] 富格式库未安装，已降级导出 → {actual}（{meta['chars']} 字符）", file=sys.stderr)
+        else:
+            print(f"[完成] 已生成 {std_type} 交付物（{args.format}）→ {actual}（{meta['chars']} 字符）", file=sys.stderr)
     else:
-        rendered = md
-        ext = ".md"
-
-    if args.output:
-        out_path = args.output
-        if not out_path.endswith(ext):
-            out_path = out_path + ext
-        Path(out_path).write_text(rendered, encoding="utf-8")
-        print(f"[完成] 已生成 {std_type} 交付物 → {out_path}（{meta['chars']} 字符）", file=sys.stderr)
-    else:
-        print(rendered)
+        rendered = _md_to_html(md, title) if args.format == "html" else md
+        if args.output:
+            out_path = args.output
+            if not out_path.endswith((".md", ".html")):
+                out_path = out_path + (".html" if args.format == "html" else ".md")
+            Path(out_path).write_text(rendered, encoding="utf-8")
+            print(f"[完成] 已生成 {std_type} 交付物 → {out_path}（{meta['chars']} 字符）", file=sys.stderr)
+        else:
+            print(rendered)
 
     if args.apply_ledger:
+        cost = None
+        if args.cost_json:
+            try:
+                cost = json.loads(args.cost_json)
+            except Exception as e:
+                print(f"[错误] --cost-json 解析失败：{e}", file=sys.stderr)
+                return 2
         res = propose_ledger(
-            args.apply_ledger, std_type,
+            args.apply_ledger, std_type, cost=cost,
             skill_tokens=args.skill_tokens, skill_minutes=args.skill_minutes,
             note=args.note or f"执行引擎：{std_type}", apply=args.confirm_ledger,
         )
