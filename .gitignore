@@ -29,3 +29,7 @@ anomaly_ledger.json
 # 本地分析文档（每次迭代手动更新，不纳入版本控制、不推 GitHub）
 code_analysis.md
 code_review_adversarial.md
+positioning-vs-competition.md
+token-skill-competitive-analysis.md
+token-skill-competitive-analysis-v2.md
+v1.0.0-prelaunch-plan.md
