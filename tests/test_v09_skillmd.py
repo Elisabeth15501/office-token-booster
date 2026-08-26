@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """tests/test_v09_skillmd.py — office-token-booster SKILL.md 定位一致性
 
-方向 B（v1.0.0）：定位翻转为「办公室 AI 提效助手 —— 执行与度量一体」。
+方向 B（v0.9.5）：定位翻转为「办公室 AI 提效助手 —— 执行与度量一体」。
 本测试锁定 SKILL.md 诚实声明：既执行（周报/纪要/数据分析/文档/PPT 大纲）又度量，
 且不替代专业排版/多模态生成、不出现超出实现范围的过度承诺（自动发邮件等）。
 
@@ -65,7 +65,7 @@ _OVERPROMISE_FORBIDDEN = [
 @allure.label("component", "documentation")
 @allure.label("risk_area", "credibility")
 @allure.label("priority", "P1")
-@allure.label("suite", "v1.0.0-direction-b")
+@allure.label("suite", "v0.9.5-direction-b")
 @src_link("SKILL.md", line=1, name="SKILL.md 源码")
 @allure.title("v1.0 SKILL.md：name 不变 + version 0.9.x + 描述诚实声明『执行与度量一体』")
 @allure.severity(allure.severity_level.CRITICAL)
@@ -76,7 +76,7 @@ def test_v09_skillmd_metadata():
     with allure.step("断言 name / version / description"):
         attach_text(fm, "frontmatter")
         assert 'name: office-token-booster' in fm, "name 必须保持不变"
-        assert 'version: 0.9' in fm, "版本应 >= 0.9.0（当前应为 0.9.3）"
+        assert 'version: 0.9' in fm, "版本应 >= 0.9.0（当前应为 0.9.5）"
         assert "办公室 AI 提效助手" in fm, "方向 B：名称翻转为「办公室 AI 提效助手」"
         assert "执行与度量一体" in fm, "应诚实声明执行与度量一体（既做又记）"
         assert "自动记下" in fm, "应声明执行后自动记账"
@@ -90,7 +90,7 @@ def test_v09_skillmd_metadata():
 @allure.label("component", "documentation")
 @allure.label("risk_area", "credibility")
 @allure.label("priority", "P1")
-@allure.label("suite", "v1.0.0-direction-b")
+@allure.label("suite", "v0.9.5-direction-b")
 @src_link("SKILL.md", line=16, name="triggers 源码")
 @allure.title("v1.0 SKILL.md：触发词诚实承诺已落地的执行器")
 @allure.severity(allure.severity_level.CRITICAL)

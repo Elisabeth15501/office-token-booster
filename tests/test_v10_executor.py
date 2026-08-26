@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""v1.0.0 方向 B：执行引擎回归测试。
+"""v0.9.5 方向 B：执行引擎回归测试。
 
 守卫点：
 - 5 个执行模块都能产出结构化 Markdown 交付物
@@ -37,7 +37,7 @@ pytestmark = [
     pytest.mark.layer("execution"),
     pytest.mark.test_type("integration"),
     pytest.mark.component("executor"),
-    pytest.mark.suite("v1.0.0-direction-b"),
+    pytest.mark.suite("v0.9.5-direction-b"),
     pytest.mark.risk_area("execution-safety"),
     pytest.mark.priority("p0"),
 ]

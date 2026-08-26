@@ -76,7 +76,7 @@ office-token-booster/
 │   ├── conversation.py   # 对话编排层（v0.4）：意图路由，把 qa/报告/Agent 串成单一对话流，不改三层一行
 │   ├── skill_bridge.py   # Skill 触发流（v0.6）：把宿主对话事件翻译成 conversation.handle() 调用，自动建议记账
 │   ├── host_hook.py      # 宿主钩子示例（v0.7）：平台无关适配器，把宿主完成事件（含真实用量）接进 skill_bridge
-│   ├── executor.py       # 任务执行引擎（v1.0.0 方向 B）：按 task_type 分发，模板渲染 / 本地 stdlib 计算 + 自动记账闭环
+│   ├── executor.py       # 任务执行引擎（v0.9.5 方向 B）：按 task_type 分发，模板渲染 / 本地 stdlib 计算 + 自动记账闭环
 │   └── type_registry.json# 类型字典（v0.5）：标准类型名 ↔ 别名/关键词，消除自然语言记账的类型歧义
 ├── tests/
 │   ├── test_v05.py       # v0.5 实地测试：自带临时账本跑完整流程，断言类型字典消歧 + 三层一致
@@ -91,7 +91,7 @@ office-token-booster/
 │   ├── test_v091_skill_recommender.py  # v0.9.1 Skill 推荐引擎测试（13 例）
 │   ├── test_v092_skillhub_client.py  # v0.9.2 SkillHub 客户端测试（3 例）
 │   ├── test_v093_clawhub_client.py   # v0.9.3 ClawHub 客户端测试（3 例）
-│   ├── test_v10_executor.py # v1.0.0 执行引擎测试（15 例）：5 模块渲染结构 + CSV 指标 + 自动记账闭环 + baseline 护栏 + HTML 转义 + docx/xlsx 可选导出降级 + 宿主钩子 event cost 记账
+│   ├── test_v10_executor.py # v0.9.5 执行引擎测试（15 例）：5 模块渲染结构 + CSV 指标 + 自动记账闭环 + baseline 护栏 + HTML 转义 + docx/xlsx 可选导出降级 + 宿主钩子 event cost 记账
 │   ├── test_boundary.py  # 边界/负向测试（17 例）：极端输入、畸形数据、空值降级
 │   ├── test_portability_cross_agent.py  # 跨 Agent 可移植性测试（14 例）：适配器协议、通用 provider
 │   ├── test_renderer.py  # 渲染器冒烟测试（L6）：内置最小 allure-results fixture → 断言产出 HTML 含用例名/状态/环境/分类
@@ -115,7 +115,7 @@ office-token-booster/
 
 ## 测试（pytest + Allure）
 
-测试套件覆盖 v0.5–v0.9.4 的核心能力，并强制守卫「确认消息 / 摘要报告 / 内核 Diagnosis 三层数字同源（误差 < 0.05pp）」与「触发默认 dry-run 不改账本」等不变量；另含 **17 个负向/边界测试**（`test_boundary.py`）专门验证极端输入、畸形数据与空值下的优雅降级。**13 个跨 Agent 可移植性测试**（`test_portability_cross_agent.py`）守卫宿主适配器协议与通用 JSON provider 的兼容性。共 **118 个用例**（v0.5×3 + v0.6×7 + v0.7×7 + 渲染器×2 + 边界×17 + v0.8×8 + v0.9×22[host_cost×9+realformat×3+qa_consumption×6+skillmd×4] + v0.9.1×13 + v0.9.2×3 + v0.9.3×3 + v0.9.4×5 + 可移植×13 + v1.0.0 执行引擎×15），全绿。三层一致测试改为**直接比对内核重算值**（不再靠正则抓文案），文案改动不会让测试误伤。
+测试套件覆盖 v0.5–v0.9.5 的核心能力，并强制守卫「确认消息 / 摘要报告 / 内核 Diagnosis 三层数字同源（误差 < 0.05pp）」与「触发默认 dry-run 不改账本」等不变量；另含 **17 个负向/边界测试**（`test_boundary.py`）专门验证极端输入、畸形数据与空值下的优雅降级。**13 个跨 Agent 可移植性测试**（`test_portability_cross_agent.py`）守卫宿主适配器协议与通用 JSON provider 的兼容性。共 **118 个用例**（v0.5×3 + v0.6×7 + v0.7×7 + 渲染器×2 + 边界×17 + v0.8×8 + v0.9×22[host_cost×9+realformat×3+qa_consumption×6+skillmd×4] + v0.9.1×13 + v0.9.2×3 + v0.9.3×3 + v0.9.4×5 + 可移植×13 + v0.9.5 执行引擎×15），全绿。三层一致测试改为**直接比对内核重算值**（不再靠正则抓文案），文案改动不会让测试误伤。
 
 每个用例在报告里额外携带：
 
@@ -160,7 +160,7 @@ python -m pytest tests/ -v --alluredir=allure-results
 | v0.9.2 | `test_v092_skillhub_client.py` | SkillHub 客户端：搜索接口返回结构校验、结果字段完整性、安装提示格式化含技能名 |
 | v0.9.3 | `test_v093_clawhub_client.py` | ClawHub 客户端：搜索接口返回结构校验、结果字段完整性、安装提示格式化含技能名 |
 | v0.9.4 | `test_v094_gate.py` | **v1.0.0 质量门禁回归**：P0 缺省 baseline 写回护栏（拦截污染账本）/ P1 确认词收窄（记账优先、强确认词）/ P2 HTML 注入转义（用户字段 `html.escape` + 联网 URL 仅允 http(s)） |
-| v1.0.0（方向 B） | `test_v10_executor.py` | **任务执行引擎**：5 模块渲染产物结构（周报/纪要/数据分析/文档整理/PPT 大纲）、CSV 指标计算（sum/avg/min/max/median）、自动记账闭环（propose_ledger 走 `run_long_chain` 护栏，baseline 缺省拦截不污染账本）、dry-run 预览不写盘、用户内容 HTML 转义防 XSS、**docx/xlsx 可选导出优雅降级**（缺失依赖回落 md/csv）、**宿主钩子 `host_hook.on_executor_completed` 用 event cost 自动记账**；全维度打标 |
+| v0.9.5（方向 B） | `test_v10_executor.py` | **任务执行引擎**：5 模块渲染产物结构（周报/纪要/数据分析/文档整理/PPT 大纲）、CSV 指标计算（sum/avg/min/max/median）、自动记账闭环（propose_ledger 走 `run_long_chain` 护栏，baseline 缺省拦截不污染账本）、dry-run 预览不写盘、用户内容 HTML 转义防 XSS、**docx/xlsx 可选导出优雅降级**（缺失依赖回落 md/csv）、**宿主钩子 `host_hook.on_executor_completed` 用 event cost 自动记账**；全维度打标 |
 | 可移植性 | `test_portability_cross_agent.py` | 跨 Agent 适配器协议：最小 Provider 满足接口、真实 Provider 均通过、跨 Agent 闭环、OpenAI 格式兼容、通用 JSON provider、优雅降级未知宿主、去重逻辑、CLI 参数校验 |
 
 > 每个用例都通过 `allure.feature/story/severity/description/step/attach` 在报告里给出可读的「做了什么、看到了什么」，方便非技术评审直接看懂。
@@ -237,5 +237,5 @@ ci: 新增 pytest + allure 自动渲染工作流
 - v0.9（已完成）：诚实定位 + 真实宿主用量接入 —— SKILL.md 定位收敛为 Option C「办公室 Token 洞察与提效助手」：明确「只度量、不执行」，新增 QUICKSTART 与「可选只读本机宿主用量」Non-goals 声明（不联网、无密钥，满足安全红线）；新增 `scripts/host_cost.py`（隔离层，`CostRecord` / `EventCostProvider` / `LocalProvider` / `draft_entries_from_host`，纯标准库、无网络、无密钥、脏数据降级不崩），把 `skill_tokens` 从「用户自报」升级为「宿主实测」；`skill_bridge.on_conversation_event` 新增 `cost_provider` 参数（事件无 cost 时用宿主实测补全并标注来源，向后兼容 `None`）；`ledger_agent` 新增 `import_host_usage`（默认 dry-run 不写盘）。新增 `tests/test_v09_host_cost.py`（9 例）+ `tests/test_v09_skillmd.py`（4 例），守卫「诚实定位不回潮」；用例总数 44 → 57。内核与三层外壳 + 编排层仍零改动
 - v0.9.2（已完成）：SkillHub 联网搜索 —— 新增 `scripts/skillhub_client.py`（SkillHub HTTP 客户端，支持搜索和详情查询）与 `scripts/skill_recommender.py`（推荐引擎）；`report_engine` 新增 `--online` 参数启用联网模式，自动搜索 SkillHub 获取最新省 Token Skill 信息；所有推荐默认需用户确认才能安装，报告含 ⚠️ 安全提示；新增 `tests/test_v091_skill_recommender.py`（13 例）。用例总数 57 → 70。
 - v0.9.3（已完成）：ClawHub 联网搜索 —— 新增 `scripts/clawhub_client.py`（ClawHub HTTP 客户端）；推荐引擎同时支持 SkillHub 和 ClawHub 双平台搜索；报告格式展示双平台信息（stars, installs, tags）；新增 `tests/test_v092_skillhub_client.py`（3 例）+ `tests/test_v093_clawhub_client.py`（3 例）。用例总数 70 → 76。
-- v1.0.0（方向 B · 进行中）：执行引擎落地 —— 用户 2026-08-25 决策从方向 A（仅度量）切到 **方向 B（度量 + 真实执行）**：SKILL.md 承诺翻转「只度量、不执行」→「既帮你做、又自动记账」，triggers/non_triggers 同步更新；新增 `scripts/executor.py`（任务执行引擎，按 `task_type` 分发：周报/纪要/数据分析/文档整理/PPT 大纲，内容类走模板渲染、数据类走本地 stdlib 计算，纯标准库、无 LLM/无网络/无密钥），每次执行后 `propose_ledger` 走 `run_long_chain` 护栏自动记账（baseline 缺省拦截、默认 dry-run）；新增 `tests/test_v10_executor.py`（9 例，全维度打标）。**Phase 2 已落地**：`executor.py` 增加 `--format docx/xlsx` 可选导出（python-docx/openpyxl 为可选依赖，缺失自动降级 md/csv，零依赖默认不受影响）；`host_hook.py` 新增 `on_executor_completed(ledger_path, task_type, event, apply)`，把 executor 完成事件的真实用量（`event["cost"]`）直接记回 ledger，与 v0.7 宿主完成事件形态一致。测试 112 → **118**（执行引擎 9 → 15 例）。内核与三层外壳 + 编排层仍零改动。
+- v0.9.5（方向 B · 执行引擎 + Phase 2 落地 · 已完成）：执行引擎落地 —— 用户 2026-08-25 决策从方向 A（仅度量）切到 **方向 B（度量 + 真实执行）**：SKILL.md 承诺翻转「只度量、不执行」→「既帮你做、又自动记账」，triggers/non_triggers 同步更新；新增 `scripts/executor.py`（任务执行引擎，按 `task_type` 分发：周报/纪要/数据分析/文档整理/PPT 大纲，内容类走模板渲染、数据类走本地 stdlib 计算，纯标准库、无 LLM/无网络/无密钥），每次执行后 `propose_ledger` 走 `run_long_chain` 护栏自动记账（baseline 缺省拦截、默认 dry-run）；新增 `tests/test_v10_executor.py`（9 例，全维度打标）。**Phase 2 已落地**：`executor.py` 增加 `--format docx/xlsx` 可选导出（python-docx/openpyxl 为可选依赖，缺失自动降级 md/csv，零依赖默认不受影响）；`host_hook.py` 新增 `on_executor_completed(ledger_path, task_type, event, apply)`，把 executor 完成事件的真实用量（`event["cost"]`）直接记回 ledger，与 v0.7 宿主完成事件形态一致。测试 112 → **118**（执行引擎 9 → 15 例）。内核与三层外壳 + 编排层仍零改动。**v1.0.0 留作正式产品发布**：Phase 3（安全预检脚本接 CI + 对话流 execute 意图路由）与 Phase 4（bump 1.0.0 + GitHub Pages 闸门 + 天禧苍穹共创计划提交）完成后，再切 1.0.0 并开 Pages。
 - 目标：提交「天禧 AI Skills 苍穹共创计划」（截止 2026-12-31）
