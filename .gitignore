@@ -21,6 +21,12 @@ allure-results-tomb-*/
 public/
 *.log
 
+# 用户手测产物（不纳入版本控制、不推 GitHub）
+test product/
+测试账本.json
+测试周报.md
+测试报告.html
+
 # 冗余 / 测试文件（沙箱 safe-delete 限制下保留于磁盘但退出跟踪）
 scripts/saving_report.py
 sample_ledger.json
