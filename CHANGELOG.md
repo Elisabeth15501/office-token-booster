@@ -9,6 +9,12 @@
 方向 B（执行 + 度量）执行引擎打磨，**修复实测暴露的功能级缺陷（D1/D2）+ 三处增强（E1–E4）**。
 全套测试 123 → **126 passed**（新增 3 例 D1 回归），零回归。测试 2 / 测试 3 已用修正后正道命令复验通过。
 
+### 安全修复（CodeQL CWE-20）
+- **S1 · 修复 `skillhub_client.py` URL 子串消毒不完整**
+  - 原代码 `if homepage and "github.com" in homepage:` 仅做子串包含判断，可能导致任意位置含 `github.com` 的恶意 URL 被误判为合法 GitHub 仓库。
+  - 改为 `urllib.parse.urlparse(homepage).hostname`，并对 hostname 小写归一化后仅接受 `github.com` 或 `*.github.com`；解析异常兜底为 `None`。
+  - 修复 GitHub CodeQL 告警 *Incomplete URL substring sanitization #1*。
+
 ### 缺陷修补（D1–D2，实测 Test 2/3 根因）
 - **D1 · 新增「一等创建空账本」命令 `--init-ledger`（Test 2/3 根因修复）**
   - 此前用户只能用 `echo {"tasks":[]} > 账本.json`（PowerShell 下报语法错）或 `python -c "open(...).write('{\"tasks\":[]}')"`（PowerShell 下 `\"` 未转义致 SyntaxError）来建账本，两个写法在用户真实环境均失败。
