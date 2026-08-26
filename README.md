@@ -76,7 +76,7 @@ office-token-booster/
 │   ├── conversation.py   # 对话编排层（v0.4）：意图路由，把 qa/报告/Agent 串成单一对话流，不改三层一行
 │   ├── skill_bridge.py   # Skill 触发流（v0.6）：把宿主对话事件翻译成 conversation.handle() 调用，自动建议记账
 │   ├── host_hook.py      # 宿主钩子示例（v0.7）：平台无关适配器，把宿主完成事件（含真实用量）接进 skill_bridge
-│   ├── executor.py       # 任务执行引擎（v0.9.5 方向 B）：按 task_type 分发，模板渲染 / 本地 stdlib 计算 + 自动记账闭环
+│   ├── executor.py       # 任务执行引擎（v0.9.6 方向 B）：按 task_type 分发，模板渲染 / 本地 stdlib 计算 + 自动记账闭环
 │   └── type_registry.json# 类型字典（v0.5）：标准类型名 ↔ 别名/关键词，消除自然语言记账的类型歧义
 ├── tests/
 │   ├── test_v05.py       # v0.5 实地测试：自带临时账本跑完整流程，断言类型字典消歧 + 三层一致

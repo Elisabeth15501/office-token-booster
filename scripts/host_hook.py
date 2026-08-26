@@ -182,7 +182,7 @@ def _demo_executor_completed() -> int:
         if res is None:
             print("[记账] ledger_agent 不可用，跳过。")
         elif res.get("blocked"):
-            print(f"[记账] 已拦截：{res.get('reason')}（请补填 baseline 后确认写回）")
+            print(f"[记账] 已拦截：{res.get('block_reason') or res.get('reason')}（请补填 baseline 后确认写回）")
         else:
             entry = res.get("entry", {})
             print(f"[记账] 预览：类型={res.get('pending_type') or entry.get('type')} "

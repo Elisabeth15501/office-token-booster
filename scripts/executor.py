@@ -115,16 +115,42 @@ def render_weekly_report(text: str) -> str:
     lines = _lines(text)
     rng = _detect_date_range(text)
     overview, work, plan, risk = [], [], [], []
+
+    # 行内锚点前缀：一行内混合多个要点时（如「风险：x；下周：y」），按前缀正确路由，
+    # 避免整行被「下周」等关键词抢走而丢失「风险」段（E3 增强）。
+    # 长标签优先（如「本周概览」「下周计划」），保证去前缀更干净。
+    _ANCHORS = [
+        (re.compile(r"^\s*(风险|阻塞|卡点|问题|blocker|issue)\s*[:：]?", re.I), risk),
+        (re.compile(r"^\s*(下周计划|下週计划|下周|下週|计划|规划|plan|todo|后续|待办)\s*[:：]?", re.I), plan),
+        (re.compile(r"^\s*(本周概览|本周|概览|摘要|总览|summary|overview)\s*[:：]?", re.I), overview),
+    ]
+
+    def classify(sub: str):
+        s = sub.strip()
+        if not s:
+            return None
+        # 1) 行内锚点前缀优先（如「风险：…」「下周计划：…」「概览：…」）
+        for pat, bucket in _ANCHORS:
+            if pat.match(s):
+                content = pat.sub("", s).strip() or s
+                return bucket, content
+        # 2) 无显式前缀时，按关键词兜底（与旧逻辑一致）
+        if re.search(r"下周|下週|计划|规划|plan|todo|后续|待办", s, re.I):
+            return plan, s
+        if re.search(r"风险|阻塞|卡点|问题|卡住|blocker|issue|待解决", s, re.I):
+            return risk, s
+        if re.search(r"概览|摘要|本周|总览|summary|overview", s, re.I) and not work:
+            return overview, s
+        return work, s
+
     for ln in lines:
-        low = ln.lower()
-        if re.search(r"下周|计划|plan|todo-plan|后续", ln):
-            plan.append(ln)
-        elif re.search(r"风险|阻塞|问题|卡住|blocker|issue|待解决", ln):
-            risk.append(ln)
-        elif re.search(r"概览|摘要|本周|summary|overview", ln) and not work:
-            overview.append(ln)
-        else:
-            work.append(ln)
+        # 一行内多个要点用 ；/ ; 分隔时，拆开分别归类（E3 增强核心）
+        for sub in re.split(r"[；;]", ln):
+            r = classify(sub)
+            if r is None:
+                continue
+            bucket, content = r
+            bucket.append(content)
 
     out = [f"# 周报（{rng}）", ""]
     if overview:
@@ -333,13 +359,17 @@ def propose_ledger(ledger_path: str, task_type: str,
                    cost: Optional[dict] = None,
                    skill_tokens: Optional[int] = None,
                    skill_minutes: Optional[int] = None,
+                   baseline_tokens: Optional[int] = None,
+                   baseline_minutes: Optional[int] = None,
                    note: Optional[str] = None,
                    apply: bool = False) -> Optional[dict]:
     """执行完后把这笔账记回 ledger。
 
     cost 为宿主完成事件的用量字典 {"skill_tokens": N, "skill_minutes": M}
     （复用 v0.7 build_completion_event 形态）；显式传入的 skill_tokens/
-    skill_minutes 优先于 cost 字典。baseline 由用户后续补（护栏会拦截缺省写回）。
+    skill_minutes 优先于 cost 字典。
+    baseline_tokens / baseline_minutes 为用户「笨办法」手搓基准，显式传入可绕过
+    P0 护栏直接写回（空账本上不传 baseline 会被护栏拦截，避免负节省污染账本）。
     """
     if cost:
         if skill_tokens is None:
@@ -352,7 +382,9 @@ def propose_ledger(ledger_path: str, task_type: str,
         return None
     return run_long_chain(
         ledger_path, task_type, apply=apply,
-        skill_tokens=skill_tokens, skill_minutes=skill_minutes, note=note,
+        skill_tokens=skill_tokens, skill_minutes=skill_minutes,
+        baseline_tokens=baseline_tokens, baseline_minutes=baseline_minutes,
+        note=note,
     )
 
 
@@ -591,6 +623,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--apply-ledger", help="执行后自动记回的 ledger.json 路径")
     ap.add_argument("--skill-tokens", type=int, help="本次执行实测消耗的 Token（来自宿主 event 或自估）")
     ap.add_argument("--skill-minutes", type=int, help="本次执行耗时（分钟）")
+    ap.add_argument("--baseline-tokens", type=int, help="本次任务的「笨办法」手搓基准 Token；显式传入可绕过 P0 护栏直接写回")
+    ap.add_argument("--baseline-minutes", type=int, help="本次任务的「笨办法」手搓基准耗时（分钟）")
     ap.add_argument("--cost-json", help="宿主完成事件的 cost JSON，如 '{\"skill_tokens\":1800,\"skill_minutes\":5}'，自动合并进记账")
     ap.add_argument("--note", help="记账备注")
     ap.add_argument("--confirm-ledger", action="store_true", help="与 --apply-ledger 同用，真正写回（否则仅预览）")
@@ -637,15 +671,25 @@ def main(argv: Optional[list[str]] = None) -> int:
             except Exception as e:
                 print(f"[错误] --cost-json 解析失败：{e}", file=sys.stderr)
                 return 2
-        res = propose_ledger(
-            args.apply_ledger, std_type, cost=cost,
-            skill_tokens=args.skill_tokens, skill_minutes=args.skill_minutes,
-            note=args.note or f"执行引擎：{std_type}", apply=args.confirm_ledger,
-        )
+        try:
+            res = propose_ledger(
+                args.apply_ledger, std_type, cost=cost,
+                skill_tokens=args.skill_tokens, skill_minutes=args.skill_minutes,
+                baseline_tokens=args.baseline_tokens, baseline_minutes=args.baseline_minutes,
+                note=args.note or f"执行引擎：{std_type}", apply=args.confirm_ledger,
+            )
+        except FileNotFoundError:
+            # E4：账本文件不存在时给出友好提示（而非原始栈），交付物已正常生成，仅跳过记账
+            print(f"[错误] 记账账本文件不存在：{args.apply_ledger}", file=sys.stderr)
+            print("       请先创建空账本后再记账，例如：", file=sys.stderr)
+            print('       echo {"tasks":[]} > ' + args.apply_ledger, file=sys.stderr)
+            print("[提示] 本次交付物已正常生成，仅自动记账被跳过。", file=sys.stderr)
+            return 0
         if res is None:
             print("[记账] ledger_agent 不可用，跳过自动记账。", file=sys.stderr)
         elif res.get("blocked"):
-            print(f"[记账] 已拦截：{res.get('reason')}（请补填 baseline 后确认写回）", file=sys.stderr)
+            block_reason = res.get("block_reason") or res.get("reason") or "（未知原因，请检查 baseline）"
+            print(f"[记账] 已拦截：{block_reason}（请补填 baseline 后确认写回）", file=sys.stderr)
         elif args.confirm_ledger:
             print(f"[记账] 已写回账本：{res.get('ledger_path')}", file=sys.stderr)
         else:

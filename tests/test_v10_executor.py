@@ -272,3 +272,93 @@ def test_host_hook_executor_completed_uses_event_cost():
         assert res["entry"]["skill_tokens"] == 1800
         assert res["entry"]["skill_minutes"] == 5
         assert json.load(open(ledger, encoding="utf-8"))["tasks"] == []
+
+
+# --------------------------------------------------------------------------
+# v0.9.6 增强回归（E1–E4）
+# --------------------------------------------------------------------------
+@allure.title("v0.9.6 E1：propose_ledger 透传 baseline 后可真正写回空账本")
+@allure.severity(allure.severity_level.CRITICAL)
+@allure.description("executor 自动记账闭环：显式传入 baseline 应绕过 P0 护栏写回，而非永远被拦截。")
+def test_propose_ledger_writes_with_explicit_baseline():
+    ledger = Path(tempfile.mkdtemp()) / "ledger.json"
+    ledger.write_text(json.dumps({"tasks": []}, ensure_ascii=False), encoding="utf-8")
+    res = propose_ledger(str(ledger), "周报生成", skill_tokens=1800, skill_minutes=5,
+                         baseline_tokens=6000, baseline_minutes=30, apply=True)
+    with allure.step("断言写回成功且账本含 1 条"):
+        assert res is not None
+        assert res.get("applied") is True, "显式 baseline 应通过护栏写回"
+        assert res.get("blocked") is not True
+        tasks = json.load(open(ledger, encoding="utf-8"))["tasks"]
+        assert len(tasks) == 1
+        assert tasks[0]["skill_tokens"] == 1800
+        assert tasks[0]["baseline_tokens"] == 6000
+
+
+@allure.title("v0.9.6 E1：executor CLI 经 --baseline-tokens 写回账本")
+@allure.severity(allure.severity_level.CRITICAL)
+@allure.description("端到端：--confirm-ledger 配合 --baseline-tokens 应能真正写回账本。")
+def test_executor_cli_apply_with_baseline_writes(capsys):
+    ledger = Path(tempfile.mkdtemp()) / "ledger.json"
+    ledger.write_text(json.dumps({"tasks": []}, ensure_ascii=False), encoding="utf-8")
+    rc = executor.main([
+        "--type", "周报生成", "--input", "要点X",
+        "--apply-ledger", str(ledger),
+        "--skill-tokens", "1800", "--baseline-tokens", "6000",
+        "--baseline-minutes", "30", "--confirm-ledger",
+    ])
+    err = capsys.readouterr().err
+    assert rc == 0
+    assert "已写回账本" in err
+    tasks = json.load(open(ledger, encoding="utf-8"))["tasks"]
+    assert len(tasks) == 1
+
+
+@allure.title("v0.9.6 E2：--confirm-ledger 被拦截时显示真实 block_reason（不再 None）")
+@allure.severity(allure.severity_level.NORMAL)
+@allure.description("executor 读 res.get('reason') 键名错，应读 block_reason，避免「已拦截：None」。")
+def test_confirm_ledger_shows_block_reason(capsys):
+    ledger = Path(tempfile.mkdtemp()) / "ledger.json"
+    ledger.write_text(json.dumps({"tasks": []}, ensure_ascii=False), encoding="utf-8")
+    rc = executor.main([
+        "--type", "周报生成", "--input", "要点X",
+        "--apply-ledger", str(ledger), "--skill-tokens", "1800", "--confirm-ledger",
+    ])
+    err = capsys.readouterr().err
+    assert rc == 0
+    assert "已拦截" in err
+    assert "None" not in err, "不应再出现「已拦截：None」"
+    assert "手搓" in err, "应显示真实拦截原因（缺 baseline）"
+
+
+@allure.title("v0.9.6 E3：周报行内锚点——一行混合要点不丢「风险」段")
+@allure.severity(allure.severity_level.CRITICAL)
+@allure.description("render_weekly_report 按 ；/ ; 拆子项并识别行内前缀，避免风险段被「下周」整行吞掉。")
+def test_weekly_report_inline_anchors_split():
+    md, _ = execute("周报生成",
+                    "本周概览：方向B落地；完成executor骨架\n风险：回归覆盖不足；下周计划：补测试")
+    with allure.step("断言四类结构均出现且风险未被吞"):
+        assert "## 本周概览" in md
+        assert "## 重点工作" in md
+        assert "## 风险与阻塞" in md
+        assert "## 下周计划" in md
+        assert "回归覆盖不足" in md
+        assert "补测试" in md
+        # 风险要点不应错进「下周计划」段（原 bug 会把整行吞掉）
+        assert "风险" in md
+
+
+@allure.title("v0.9.6 E4：账本文件不存在时友好提示而非原始栈")
+@allure.severity(allure.severity_level.NORMAL)
+@allure.description("executor --apply-ledger 指向不存在文件应捕获 FileNotFoundError 给友好提示。")
+def test_missing_ledger_friendly_error(capsys):
+    rc = executor.main([
+        "--type", "周报生成", "--input", "要点X",
+        "--apply-ledger", "/nonexistent/path/账本.json",
+        "--skill-tokens", "1800",
+    ])
+    out = capsys.readouterr()
+    assert rc == 0
+    assert "不存在" in out.err
+    assert "tasks" in out.err, "应给出创建空账本的提示"
+    assert "# 周报" in out.out, "交付物应正常生成（仅记账被跳过）"
