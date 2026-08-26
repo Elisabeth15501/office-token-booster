@@ -4,27 +4,35 @@
 
 ---
 
-## v0.9.6 — 执行引擎增强（2026-08-27）
+## v0.9.6 — 执行引擎增强 + 缺陷修补（2026-08-27）
 
-方向 B（执行 + 度量）执行引擎打磨，**重点修复此前实测暴露的两处真实缺陷 + 两处打磨**。
-全套测试 118 → **123 passed**（新增 5 例 E1–E4 回归），零回归。
+方向 B（执行 + 度量）执行引擎打磨，**修复实测暴露的功能级缺陷（D1/D2）+ 三处增强（E1–E4）**。
+全套测试 123 → **126 passed**（新增 3 例 D1 回归），零回归。测试 2 / 测试 3 已用修正后正道命令复验通过。
 
-### 新增 / 修复（E1–E4）
+### 缺陷修补（D1–D2，实测 Test 2/3 根因）
+- **D1 · 新增「一等创建空账本」命令 `--init-ledger`（Test 2/3 根因修复）**
+  - 此前用户只能用 `echo {"tasks":[]} > 账本.json`（PowerShell 下报语法错）或 `python -c "open(...).write('{\"tasks\":[]}')"`（PowerShell 下 `\"` 未转义致 SyntaxError）来建账本，两个写法在用户真实环境均失败。
+  - 新增 `executor.py --init-ledger <path>`：写入 `{"tasks":[]}`（UTF-8、ensure_ascii=False），父目录自动创建；账本已存在时幂等跳过不覆盖。执行引擎首次记账不再依赖脆弱 shell 命令。
+- **D2 · E4 友好提示改为推荐 `--init-ledger`**
+  - 原 E4 提示里教用户 `echo {"tasks":[]}` ——正是 Test 2 在 PowerShell 失败的命令。改为推荐安全的 `.venv\Scripts\python scripts\executor.py --init-ledger <path>`。
+
+### 增强（E1–E4）
 - **E1 · 打通自动记账闭环（功能级修复）**
   - `executor.propose_ledger` 新增 `baseline_tokens` / `baseline_minutes` 参数并透传给 `ledger_agent.run_long_chain`。
   - CLI 新增 `--baseline-tokens` / `--baseline-minutes`；配合 `--confirm-ledger` 即可在**空账本**上真正写回（此前因 P0 护栏永远拦截 baseline 缺省条目，执行引擎的自动记账对首条记录是条死路）。
   - 不传 baseline 时仍走 P0 护栏拦截（不污染账本），行为向后兼容。
 - **E2 · 修复「已拦截：None」**
-  - `executor.py` 第 647 行误读 `res.get('reason')`，实际键名为 `block_reason`；改为 `res.get('block_reason') or res.get('reason')`，拦截时显示真实原因。
-  - 连带修复 `host_hook.py` 第 185 行同款键名 bug。
+  - `executor.py` 误读 `res.get('reason')`，实际键名为 `block_reason`；改为 `res.get('block_reason') or res.get('reason')`，拦截时显示真实原因。
+  - 连带修复 `host_hook.py` 同款键名 bug。
 - **E3 · 周报引擎行内锚点增强**
   - `render_weekly_report` 按 `；`/`;` 拆分一行内的多个要点，分别归类；识别行内前缀 `风险：`/`下周：`/`阻塞：`/`概览：` 等路由。
   - 修复测试1 中「一行混合要点被整行抢走、丢失『风险与阻塞』段」的问题。
 - **E4 · 缺失账本文件友好提示**
-  - `--apply-ledger` 指向不存在文件时，捕获 `FileNotFoundError` 输出友好提示（含创建空账本的示例命令），不再抛出原始栈；交付物照常生成，仅跳过记账。
+  - `--apply-ledger` 指向不存在文件时，捕获 `FileNotFoundError` 输出友好提示（推荐 `--init-ledger`），不再抛出原始栈；交付物照常生成，仅跳过记账。
 
 ### 测试
-- 新增 `tests/test_v10_executor.py`：E1（透传 baseline 写回 / CLI 端到端写回）、E2（拦截显示真实原因）、E3（行内锚点不丢风险段）、E4（缺失账本友好提示）共 5 例。
+- 新增 3 例 D1 回归：`--init-ledger` 建空账本 / 对已存在账本幂等跳过 / init→带 baseline 写回→report_engine 生成 HTML 全闭环。
+- 既有 E1–E4 共 5 例回归不变。
 
 ---
 

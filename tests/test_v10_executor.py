@@ -360,5 +360,65 @@ def test_missing_ledger_friendly_error(capsys):
     out = capsys.readouterr()
     assert rc == 0
     assert "不存在" in out.err
-    assert "tasks" in out.err, "应给出创建空账本的提示"
+    assert "--init-ledger" in out.err, "应推荐安全的 --init-ledger 而非脆弱的 echo/python -c"
     assert "# 周报" in out.out, "交付物应正常生成（仅记账被跳过）"
+
+
+@allure.title("v0.9.6 D1：--init-ledger 创建空账本（Test2/3 根因修复）")
+@allure.severity(allure.severity_level.NORMAL)
+@allure.description("--init-ledger 应写入 {\"tasks\":[]} 并安全退出，替代脆弱的 echo / python -c。")
+def test_init_ledger_creates_empty(capsys, tmp_path):
+    p = tmp_path / "账本.json"
+    rc = executor.main(["--init-ledger", str(p)])
+    out = capsys.readouterr()
+    assert rc == 0
+    assert p.exists()
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert data == {"tasks": []}
+    assert "已创建空账本" in out.err
+
+
+@allure.title("v0.9.6 D1：--init-ledger 对已存在账本幂等跳过")
+@allure.severity(allure.severity_level.MINOR)
+@allure.description("账本已存在时不应覆盖，给出提示并正常退出。")
+def test_init_ledger_idempotent(capsys, tmp_path):
+    p = tmp_path / "账本.json"
+    p.write_text(json.dumps({"tasks": [{"x": 1}]}, ensure_ascii=False), encoding="utf-8")
+    rc = executor.main(["--init-ledger", str(p)])
+    out = capsys.readouterr()
+    assert rc == 0
+    # 原数据未被覆盖
+    assert json.loads(p.read_text(encoding="utf-8")) == {"tasks": [{"x": 1}]}
+    assert "已存在" in out.err
+
+
+@allure.title("v0.9.6 D1+E1：init 后带 baseline 闭环可写回并出报告")
+@allure.severity(allure.severity_level.NORMAL)
+@allure.description("先用 --init-ledger 建空账本，再 --confirm-ledger 带 baseline 写回，report_engine 能生成 HTML。")
+def test_init_then_apply_generates_report(capsys, tmp_path):
+    ledger = tmp_path / "账本.json"
+    # 1) init
+    assert executor.main(["--init-ledger", str(ledger)]) == 0
+    # 2) 带 baseline 写回（走 executor 闭环，非空账本也能过护栏）
+    rc = executor.main([
+        "--type", "周报生成", "--input", "要点X",
+        "--apply-ledger", str(ledger),
+        "--skill-tokens", "1800", "--baseline-tokens", "6000", "--baseline-minutes", "30",
+        "--confirm-ledger",
+    ])
+    out = capsys.readouterr()
+    assert rc == 0
+    assert "已写回账本" in out.err
+    tasks = json.loads(ledger.read_text(encoding="utf-8"))["tasks"]
+    assert len(tasks) == 1
+    # 3) 报告可生成（不再因账本空而跳过）——走 report_engine CLI 真实路径
+    import report_engine, sys as _sys
+    report = tmp_path / "报告.html"
+    _old_argv = _sys.argv
+    _sys.argv = ["report_engine.py", str(ledger), "--format", "html", "--output", str(report)]
+    try:
+        rc2 = report_engine.main()
+    finally:
+        _sys.argv = _old_argv
+    assert rc2 == 0
+    assert report.exists() and report.stat().st_size > 0

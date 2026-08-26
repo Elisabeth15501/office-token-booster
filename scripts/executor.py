@@ -615,8 +615,8 @@ def _read_input(src: str) -> str:
 
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="office-token-booster 执行引擎")
-    ap.add_argument("--type", required=True, help="任务类型（周报生成/会议纪要/数据分析/文档整理/PPT大纲）")
-    ap.add_argument("--input", required=True, help="输入：文件路径、-（stdin）、或直接文本")
+    ap.add_argument("--type", required=False, help="任务类型（周报生成/会议纪要/数据分析/文档整理/PPT大纲）；--init-ledger 时无需此参数")
+    ap.add_argument("--input", required=False, help="输入：文件路径、-（stdin）、或直接文本；--init-ledger 时无需此参数")
     ap.add_argument("--output", help="输出路径（缺省打印到 stdout；docx/xlsx 必须指定）")
     ap.add_argument("--format", choices=FORMATS, default="md",
                     help="输出格式：md（默认）/ html / docx / xlsx；docx/xlsx 需可选依赖，缺失自动降级")
@@ -628,7 +628,27 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--cost-json", help="宿主完成事件的 cost JSON，如 '{\"skill_tokens\":1800,\"skill_minutes\":5}'，自动合并进记账")
     ap.add_argument("--note", help="记账备注")
     ap.add_argument("--confirm-ledger", action="store_true", help="与 --apply-ledger 同用，真正写回（否则仅预览）")
+    ap.add_argument("--init-ledger", help="创建空账本文件（写入 {\"tasks\":[]}），用于首次记账前初始化；指定后无需 --type")
     args = ap.parse_args(argv)
+
+    # D1：一等「创建空账本」命令，替代脆弱的 echo / python -c（Test 2/3 根因）
+    if args.init_ledger:
+        p = Path(args.init_ledger)
+        if p.exists():
+            print(f"[提示] 账本已存在，跳过初始化：{args.init_ledger}（如需重建请先删除旧文件）", file=sys.stderr)
+            return 0
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"tasks": []}, ensure_ascii=False), encoding="utf-8")
+        print(f"[完成] 已创建空账本：{args.init_ledger}（写入 {{\"tasks\":[]}}）", file=sys.stderr)
+        return 0
+
+    if not args.type:
+        print("[错误] 缺少 --type（或使用 --init-ledger 创建账本）。", file=sys.stderr)
+        return 2
+
+    if not args.input:
+        print("[错误] 缺少 --input（或使用 --init-ledger 创建账本）。", file=sys.stderr)
+        return 2
 
     std_type = resolve_exec_type(args.type)
     if std_type is None:
@@ -681,8 +701,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         except FileNotFoundError:
             # E4：账本文件不存在时给出友好提示（而非原始栈），交付物已正常生成，仅跳过记账
             print(f"[错误] 记账账本文件不存在：{args.apply_ledger}", file=sys.stderr)
-            print("       请先创建空账本后再记账，例如：", file=sys.stderr)
-            print('       echo {"tasks":[]} > ' + args.apply_ledger, file=sys.stderr)
+            print("       请先创建空账本后再记账：", file=sys.stderr)
+            print(f"       .venv\\Scripts\\python scripts\\executor.py --init-ledger {args.apply_ledger}", file=sys.stderr)
             print("[提示] 本次交付物已正常生成，仅自动记账被跳过。", file=sys.stderr)
             return 0
         if res is None:
