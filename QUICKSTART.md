@@ -2,7 +2,7 @@
 
 5 分钟跑通「**做任务 → 自动记账 → 看提效报告**」闭环。
 
-本文件是 hands-on 实操指南（本地 CLI）。更完整的架构与能力清单见 [README.md](README.md)，v1.0.0 冲刺路线图见 [docs/v1.0.0-prelaunch-plan.md](docs/v1.0.0-prelaunch-plan.md)。
+本文件是 hands-on 实操指南（本地 CLI）。更完整的架构与能力清单见 [README.md](README.md)。
 
 ---
 
@@ -123,4 +123,3 @@ python scripts/report_engine.py ledger.json --format html --output 提效报告.
 ## 七、下一步
 
 - 完整能力清单、目录结构、测试与 CI：见 [README.md](README.md)
-- v1.0.0 冲刺计划与 Phase 路线图：见 [docs/v1.0.0-prelaunch-plan.md](docs/v1.0.0-prelaunch-plan.md)
