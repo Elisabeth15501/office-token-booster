@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import urllib.request
 import urllib.error
+import urllib.parse
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -126,8 +127,15 @@ def _parse_search_result(item: dict) -> SkillInfo:
     # 尝试从 homepage 提取 repository URL
     homepage = item.get("homepage")
     repo_url = None
-    if homepage and "github.com" in homepage:
-        repo_url = homepage
+    if homepage:
+        try:
+            host = urllib.parse.urlparse(homepage).hostname
+        except ValueError:
+            host = None
+        if host:
+            host = host.lower()
+            if host == "github.com" or host.endswith(".github.com"):
+                repo_url = homepage
 
     return SkillInfo(
         slug=slug,
