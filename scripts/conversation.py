@@ -38,6 +38,11 @@ from ledger_agent import (                                         # noqa: E402
     propose_entry, propose_automation_targets, run_long_chain)
 from report_engine import (                                        # noqa: E402
     generate_markdown_summary, generate_markdown_report)
+from executor import (  # noqa: E402  # Phase 3：execute 意图路由复用执行引擎
+    resolve_exec_type as _resolve_exec_type,
+    EXECUTORS as _EXECUTORS,
+    execute_render as _exec_render,
+)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -94,6 +99,34 @@ def _parse_numbers(text):
     tokens = _parse_number(text, r"(?:个\s*)?(?:token|tokens|Token|TOKEN)")
     minutes = _parse_number(text, r"(?:分钟|分|min|mins)")
     return tokens, minutes
+
+
+_BASE_TOKEN_RE = re.compile(
+    r"(基准|手搓|baseline|笨办法)[^\d]*?(\d[\d,]*\.?\d*)\s*(万|千|k|w)?\s*(?:个\s*)?(token|tokens|Token|TOKEN)", re.I)
+_BASE_MIN_RE = re.compile(
+    r"(基准|手搓|baseline|笨办法)[^\d]*?(\d[\d,]*\.?\d*)\s*(万|千|k|w)?\s*(?:个\s*)?(分钟|分|min|mins)", re.I)
+
+
+def _parse_baseline(text):
+    """从确认话里抽 baseline 成本（基准 / 手搓 / baseline / 笨办法 前缀的 token/分钟）。
+
+    与 _parse_numbers 区分：用户说「确认 baseline 12000 token 25分钟」时，
+    12000/25 应归 baseline 而非 skill 消耗。baseline 词在成本数字之前，
+    故用独立正则（不依赖 _parse_number 的「数字 + 关键词」拼接）。
+    """
+    def _grab(rx):
+        m = rx.search(text or "")
+        if not m:
+            return None
+        raw = m.group(2).replace(",", "")
+        if raw in ("", "."):
+            return None
+        try:
+            val = float(raw)
+        except ValueError:
+            return None
+        return int(val * _UNIT_MULT.get((m.group(3) or "").lower(), 1))
+    return _grab(_BASE_TOKEN_RE), _grab(_BASE_MIN_RE)
 
 
 def _detect_type(text, diag):
@@ -177,6 +210,39 @@ COMPLETION_VERBS = (
 _COMPLETION_VERBS_RE = re.compile(COMPLETION_VERBS)
 
 
+# 执行意图识别（Phase 3 新增）：用户说「帮我写周报 / 生成纪要 / 做PPT」等主动执行请求。
+# 仅匹配具体任务域词（周报/纪要/数据/文档/PPT），不吞「报告/摘要」（走 report 意图）。
+_EXEC_RE = re.compile(
+    r"(帮我|请|麻烦|替我|给我|来个)?\s*"
+    r"(写|做|生成|整理|分析|起草|产出|提炼|总结|拟|编|列|画)\s*"
+    r"(一[份个篇]|份|个|篇|下)?\s*"
+    r"(周报|周报生成|纪要|会议纪要|会议记录|数据|数据分析|报表|文档|材料|文章|要点|PPT|ppt|幻灯片|大纲|csv|excel|xlsx|表格)",
+    re.I,
+)
+
+# execute 域词同义 → 执行引擎标准类型（csv/excel/表格 等归数据分析）
+_EXEC_SYNONYMS = {
+    "csv": "数据分析", "excel": "数据分析", "xlsx": "数据分析", "表格": "数据分析",
+}
+
+
+def _extract_exec_type(text):
+    """从执行意图话里抽标准任务类型；抽不到返回 None。"""
+    m = _EXEC_RE.search(text or "")
+    if not m:
+        return None
+    dom = (m.group(4) or "").lower()
+    return _EXEC_SYNONYMS.get(dom) or _resolve_exec_type(m.group(4) or "")
+
+
+def _extract_exec_input(text):
+    """从执行意图话里抽交付物内容：取首个冒号/换行后的部分；无分隔符则去掉执行动词短语。"""
+    parts = re.split(r"[:：\n]", text or "", maxsplit=1)
+    if len(parts) > 1 and parts[1].strip():
+        return parts[1].strip()
+    return _EXEC_RE.sub("", text or "").strip(" ：:，,。.、\n")
+
+
 def classify(text):
     """把一句话归到意图：exit / cancel / confirm / record / report_summary /
     report_full / targets / followup。"""
@@ -188,7 +254,7 @@ def classify(text):
     if re.search(r"(取消|不算了|不要记|别记|false|撤销)", t, re.I):
         return "cancel"
     # 显式记账词优先于确认（P1 修复：『好的，记一笔…』必须归 record，不被确认词吞）
-    if re.search(r"(记一笔|记录|记账|记一下|记上|登记|添加任务|新增任务|记下来|写进账本)", t):
+    if re.search(r"(记一笔|记录|记一下|记上|登记|添加任务|新增任务|记下来|写进账本)", t):
         return "record"
     # 被动完成信号：既说「完成了某任务」又给出成本数字 → 自动建议记账
     # 完成动词复用模块级 COMPLETION_VERBS（与 skill_bridge 同一事实源，修复 L3）
@@ -199,6 +265,8 @@ def classify(text):
         return "report_full"
     if re.search(r"(摘要|一页|总结一下|概览|看下概况|概括)", t):
         return "report_summary"
+    if _EXEC_RE.search(t):
+        return "execute"
     if re.search(r"(待自动化|哪些值得|自动化建议|该自动化|targets)", t, re.I):
         return "targets"
     # 确认意图：用强确认词 + 否定/疑问排除（P1 已收窄，移除宽词）
@@ -235,6 +303,23 @@ def handle(ledger_path, text, state):
         if not pending:
             # 没有待确认项：不返回错误式提示，降级为普通追问应答（修复 H2）
             return answer_followup(diag, text)
+        # Phase 3：确认时允许补充成本（execute 场景常在此补 baseline）；
+        # 同时做成本完整性护栏，避免 execute 无成本时写入全 0 污染账本。
+        bt, bm = _parse_numbers(text)
+        base_t, base_m = _parse_baseline(text)
+        if base_t is not None:
+            pending["baseline_tokens"] = base_t
+        if base_m is not None:
+            pending["baseline_minutes"] = base_m
+        if bt is not None and base_t is None:
+            pending["skill_tokens"] = bt
+        if bm is not None and base_m is None:
+            pending["skill_minutes"] = bm
+        _st = pending.get("skill_tokens")
+        _bt = pending.get("baseline_tokens")
+        if (_st in (None, 0)) and (_bt in (None, 0)):
+            return ("⚠️ 还缺成本信息，未写入账本。请补充基准成本（笨办法手搓要多少），"
+                    "例如：「确认 baseline 12000 token 25分钟」或「确认 花了1800 token 5分钟」。")
         res = run_long_chain(
             ledger_path, pending["type"], apply=True, date=pending.get("date"),
             skill_tokens=pending.get("skill_tokens"),
@@ -298,6 +383,9 @@ def handle(ledger_path, text, state):
     if intent == "report_full":
         return generate_markdown_report(diag)
 
+    if intent == "execute":
+        return _do_execute(ledger_path, text, state, diag)
+
     if intent == "targets":
         out = propose_automation_targets(diag)
         if isinstance(out, list) and out and out[0].startswith("账本暂无"):
@@ -307,6 +395,45 @@ def handle(ledger_path, text, state):
 
     # 兜底：交给 qa 做数据接地的追问应答
     return answer_followup(diag, text)
+
+
+def _do_execute(ledger_path, text, state, diag):
+    """执行意图：调 executor 生成交付物，并自动 propose 一条记账（dry-run 预览）。
+
+    与 record 意图的区别：record 是「我刚做完了、花了X」的被动记账；
+    execute 是「帮我做X」的主动执行。两者最终都进同一套 run_long_chain 护栏，
+    默认 dry-run，确认写回需补 baseline 基准成本（P0 护栏不破）。
+    """
+    etype = _extract_exec_type(text)
+    if not etype:
+        return ("没认出要执行的任务类型。支持：周报生成 / 会议纪要 / 数据分析 / "
+                "文档整理 / PPT大纲。例如：「帮我写周报：这周完成了 A、B、C」")
+    content = _extract_exec_input(text)
+    ok, rendered = _exec_render(etype, content)
+    if not ok:
+        return rendered
+
+    # 自动 propose 记账（dry-run 预览，存 pending；skill_tokens 来自宿主真实消耗，
+    # 本地 CLI 执行时用户未提供则留 None，确认写回时由护栏要求补 baseline）。
+    entry, meta = propose_entry(diag, etype, skill_tokens=None, skill_minutes=None)
+    state["pending"] = {
+        "type": etype,
+        "date": entry["date"],
+        "skill_tokens": None,
+        "skill_minutes": None,
+        "baseline_tokens": None,
+        "baseline_minutes": None,
+        "note": entry["note"],
+    }
+    lines = [
+        rendered,
+        "",
+        "---",
+        f"已生成交付物（{etype}）。是否记入账本？",
+        "回复「确认」即建议记账；写回账本需补 baseline 基准成本（笨办法手搓要多少），",
+        "例如：「确认 baseline 12000 token 25分钟」。",
+    ]
+    return "\n".join(lines)
 
 
 # ─────────────────────────────────────────────────────────────

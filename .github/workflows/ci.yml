@@ -53,6 +53,16 @@ jobs:
         if: github.event_name == 'pull_request'
         run: python .github/commitlint.py "${{ github.event.pull_request.head.sha }}"
 
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Execution-layer security preflight (4 red lines)
+        run: python scripts/security_preflight.py scripts
+
   deploy-pages:
     needs: test
     if: github.ref == 'refs/heads/main' && vars.ENABLE_PAGES == 'true'

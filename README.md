@@ -22,9 +22,26 @@
 
 ## 快速开始
 
-1. 把任务记录写成 `ledger.json`（格式见 `SKILL.md`）。
-2. 触发技能："生成提效报告"。
-3. 技能先做**一页摘要 + 图表**，再支持基于诊断结果的**追问**（如"哪个类型节省最多""按周趋势""有什么建议"）。
+本技能**既帮你做**办公任务（周报/纪要/数据分析/文档整理/PPT 大纲），**又自动记下**每次帮你省了多少 Token/时间 —— 执行与度量一体。
+
+最快上手方式：看 **[QUICKSTART.md](QUICKSTART.md)**，5 分钟跑通「初始化账本 → 执行任务 → 确认写回 → 看提效报告」闭环。
+
+```bash
+# 1) 初始化空账本（仅首次）
+python scripts/executor.py --init-ledger ledger.json
+
+# 2) 执行任务，拿到交付物（不写账本）
+python scripts/executor.py --type 周报生成 --input 本周事件.txt --output 周报.md
+
+# 3) 预览并确认写回（执行 + 自动记账，默认 dry-run）
+python scripts/executor.py --type 周报生成 --input 本周事件.txt \
+  --apply-ledger ledger.json --skill-tokens 1800 --baseline-tokens 12000 --baseline-minutes 25 --confirm-ledger
+
+# 4) 看提效报告（HTML）
+python scripts/report_engine.py ledger.json --format html --output 提效报告.html
+```
+
+如果你是天禧 / OpenClaw 宿主用户，直接说「帮我写一份周报」「整理一下会议纪要」「分析这个 CSV」即可触发，技能默认走 **dry-run 预览 + 确认写回**，不污染账本。
 
 ## 使用示例
 

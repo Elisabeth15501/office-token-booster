@@ -286,7 +286,7 @@ def test_classify_boundary():
         long_text = "生成" * 500 + "周报"
         result = classify(long_text)
         attach_text(result, "超长文本分类结果")
-        assert result in ("record", "followup", "report_summary")
+        assert result in ("record", "followup", "report_summary", "execute")
 
 
 @allure.epic("office-token-booster")

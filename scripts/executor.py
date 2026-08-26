@@ -341,6 +341,25 @@ _DISPATCH = {
     "PPT大纲": render_ppt_outline,
 }
 
+# 公开别名：供对话编排层 conversation.py 安全调用（不碰私有 _DISPATCH），
+# 也便于测试直接断言支持的类型集合。
+EXECUTORS = _DISPATCH
+
+
+def execute_render(task_type: str, text: str) -> Tuple[bool, str]:
+    """按标准类型名渲染交付物。返回 (是否成功, 内容或错误说明)。
+
+    供 conversation 的 execute 意图路由调用；不写盘、不联网、不读密钥，
+    纯本地渲染，符合执行层零依赖红线。
+    """
+    fn = EXECUTORS.get(task_type)
+    if not fn:
+        return False, f"暂不支持的任务类型：{task_type}（支持：{', '.join(EXECUTORS)}）"
+    try:
+        return True, fn(text)
+    except Exception as e:  # pragma: no cover - 渲染异常兜底
+        return False, f"渲染失败：{e}"
+
 
 def execute(task_type: str, text: str) -> tuple[str, dict]:
     """执行一个任务，返回 (markdown, meta)。task_type 为标准名。"""

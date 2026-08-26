@@ -4,6 +4,36 @@
 
 ---
 
+## v0.9.7 — Phase 3 落地：execute 意图路由 + 安全预检 + QUICKSTART（2026-08-26）
+
+完成 **Phase 3** 三项内容（原计划 10–11 月，提前至 v0.9.7），并补上独立快速开始文档。
+
+### 对话编排层 · execute 意图路由（方向 B 闭环关键一环）
+- `conversation.classify` 新增 `execute` 意图：自然语言「帮我写周报 / 整理会议纪要 / 分析 CSV / 提炼要点 / 出 PPT 大纲」自动路由到 `executor` 渲染交付物，再走 `run_long_chain` baseline 护栏自动记账。
+- 新增 `_EXEC_RE` / `_EXEC_SYNONYMS` 识别执行类中文触发词；`resolve_exec_type` 归一类型、`execute_render` 公共 API（供编排层安全调用，不碰私有 `_DISPATCH`）。
+- **防账本污染护栏**：`confirm` 分支新增「成本完整性」校验——当 skill 与 baseline 的 token/分钟均为空或 0 时，**拦截写回**并提示补成本，避免空账本出现全零/负节省记录。
+- 收窄 `record` 正则：移除裸词「记账」，避免执行内容里含「记账」二字被误路由到记账意图。
+- `conversation._do_execute`：渲染后存入 `state["pending"]`，提示预览 + 要 baseline，确认才落盘。
+
+### 执行层安全预检（四红线）+ CI 闸门
+- 新增 `scripts/security_preflight.py`：扫描 `.py` 文件检测 R1 危险执行（`eval/exec/os.system/subprocess`）、R2 网络外发（`urllib.request/requests/http.client/socket` 等）、R3 硬编码密钥（`AKIA*/sk-/ghp_/xox*/JWT/password=/secret=`）、R4 `html.escape` 转义（仅告警）。
+- 白名单：`security_preflight.py` / `test_security_preflight.py` 豁免 R1；`skillhub_client.py` / `clawhub_client.py` / `security_preflight.py` / `test_security_preflight.py` 豁免 R2（设计内允许联网的搜索客户端）。
+- `.github/workflows/ci.yml` 新增 `security` job，在 `deploy-pages` 前跑 `python scripts/security_preflight.py scripts`，**须 0 红线才放行**。
+- 当前 `scripts/` 实测通过预检（0 红线，仅 4 处 R4 转义告警）。
+
+### 文档
+- 新增独立 **[QUICKSTART.md](QUICKSTART.md)**：5 分钟跑通「初始化账本 → 执行任务 → 确认写回 → 看提效报告」闭环；含环境要求、常见任务示例表、PowerShell/Windows 注意事项、安全红线说明。
+- `README.md`「快速开始」改为方向 B 视角并链接 QUICKSTART；`SKILL.md`「快速开始（QUICKSTART）」补 execute→bookkeep 步骤并链接独立文件。
+- `docs/v1.0.0-prelaunch-plan.md`：Phase 3 三项全部勾选（含 PPT 大纲模块补勾，代码其实已在 Phase 2 随 executor 落地）；质量门禁「安全预检脚本」项勾选。
+
+### 测试
+- 新增 `tests/test_security_preflight.py`（6 例：R1/R2/R3 检测、R2 联网白名单豁免、干净文件通过、scripts/ 实测通过）。
+- 新增 `tests/test_v097_execute.py`（6 例：意图分类、渲染交付物、缺成本拦截写回、带 baseline 写回、CSV 路由、PPT 不被「记账」误路由）。
+- `tests/test_boundary.py` 超长文本分类断言补 `execute` 意图（边界测试覆盖新意图）。
+- 全套测试 **138 passed**（126 → 138，新增 12 例），零回归。
+
+---
+
 ## v0.9.6 — 执行引擎增强 + 缺陷修补（2026-08-27）
 
 方向 B（执行 + 度量）执行引擎打磨，**修复实测暴露的功能级缺陷（D1/D2）+ 三处增强（E1–E4）**。

@@ -1,7 +1,7 @@
 ---
 name: office-token-booster
 description: 办公室 AI 提效助手 —— 既帮你做周报/会议纪要/数据分析/文档整理/PPT 大纲，又自动记下每次帮你省了多少 Token 和时间。执行与度量一体：做完任务顺手记一笔，省了多少一目了然。适用于办公生产力执行、AI 用量洞察、提效度量与自动化决策场景。
-version: 0.9.6
+version: 0.9.7
 author: Elisabeth15501
 license: MIT
 tags:
@@ -132,35 +132,43 @@ metadata:
 
 ## 快速开始（QUICKSTART）
 
-零依赖（纯标准库 Python ≥3.10），从项目目录即可跑通核心闭环。
+> 完整 hands-on 实操（含 PowerShell 注意事项、常见任务示例）见仓库根 **[QUICKSTART.md](../QUICKSTART.md)**。下面给出方向 B 的核心闭环速览。
 
-**1) 准备一份账本（或用内置示例）**
+零依赖（纯标准库 Python ≥3.10），从项目目录即可跑通「做任务 → 自动记账 → 看报告」闭环。
 
-把下面内容存为 `ledger.json`：
+**1) 初始化账本（仅首次）**
 
-```json
-{
-  "tasks": [
-    {"date": "2026-08-08", "type": "周报生成",
-     "baseline_tokens": 12000, "skill_tokens": 3000,
-     "baseline_minutes": 25, "skill_minutes": 3, "note": "手写周报"},
-    {"date": "2026-08-11", "type": "会议纪要",
-     "baseline_tokens": 9000, "skill_tokens": 2500,
-     "baseline_minutes": 20, "skill_minutes": 4, "note": "2 小时会"}
-  ]
-}
+```bash
+python scripts/executor.py --init-ledger ledger.json
 ```
 
-> `baseline_*` = 你不用本技能、自己手搓 / 反复试错的估计成本；`skill_*` = 这次用 AI 实际花的。节省 = baseline − skill。
+**2) 执行任务并自动记账（方向 B 核心）**
 
-**2) 生成提效报告**
+先把任务做成交付物，再走「预览 + 确认写回」把省了多少记进账本：
+
+```bash
+# 执行任务，拿到交付物（不写账本）
+python scripts/executor.py --type 周报生成 --input 本周事件.txt --output 周报.md
+
+# 预览记账（dry-run，安全）
+python scripts/executor.py --type 周报生成 --input 本周事件.txt \
+  --apply-ledger ledger.json --skill-tokens 1800 --baseline-tokens 12000 --baseline-minutes 25
+
+# 确认写回（加 --confirm-ledger）
+python scripts/executor.py --type 周报生成 --input 本周事件.txt \
+  --apply-ledger ledger.json --skill-tokens 1800 --baseline-tokens 12000 --baseline-minutes 25 --confirm-ledger
+```
+
+> `baseline_*` = 你不用本技能、自己手搓 / 反复试错的估计成本；`skill_*` = 这次用 AI 实际花的。节省 = baseline − skill。**必须提供 baseline 才能写回**（护栏防污染账本）；不加 `--confirm-ledger` 永远是预览。
+
+**3) 生成提效报告**
 
 ```bash
 python scripts/report_engine.py ledger.json --format html --output 提效报告.html
 # 一句话摘要：加 --summary；Markdown：--format markdown
 ```
 
-**3) 对话式追问（内核 API）**
+**4) 对话式追问（内核 API）**
 
 ```python
 from scripts.diagnose import load_ledger, diagnose
@@ -170,7 +178,7 @@ print(answer_followup(d, "哪个任务类型最省 Token？"))
 print(answer_followup(d, "这周比上周怎么样？"))
 ```
 
-**4) 真实宿主用量接入（v0.9，可选）**
+**5) 真实宿主用量接入（v0.9，可选）**
 
 ```bash
 # 只读本机宿主最近 7 天用量；无数据则提示跳过，不影响其它功能
