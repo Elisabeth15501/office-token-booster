@@ -40,3 +40,8 @@ token-skill-competitive-analysis.md
 token-skill-competitive-analysis-v2.md
 v1.0.0-prelaunch-plan.md
 MANUAL_TEST_v097.md
+
+# 用户手测脚本与账本残留（本地实跑用、不纳入版本控制）
+tests/manual_run_v097.ps1
+ledger_test*.json
+*.bak
