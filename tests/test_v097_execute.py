@@ -54,6 +54,21 @@ def test_execute_with_baseline_writes(empty_ledger):
     assert n == 1, "补 baseline 后应写回"
 
 
+def test_execute_baseline_minutes_not_misrouted(empty_ledger):
+    """回归：Bug #1 修复——紧凑写法『baseline 12000 token 25分钟』的分钟须归 baseline，
+    而非被误判为 skill 分钟写入。"""
+    st = {}
+    handle(empty_ledger, "帮我写周报：完成需求评审", st)
+    handle(empty_ledger, "确认 baseline 12000 token 25分钟", st)
+    tasks = json.load(open(empty_ledger, encoding="utf-8"))["tasks"]
+    assert len(tasks) == 1
+    t = tasks[0]
+    assert t["baseline_tokens"] == 12000, "baseline token 应归 baseline"
+    assert t["baseline_minutes"] == 25, "bug#1: 分钟须归 baseline_minutes"
+    assert t["skill_tokens"] == 0, "baseline 优先级下 skill 不应写入"
+    assert t["skill_minutes"] == 0, "bug#1: 分钟不应错归 skill_minutes"
+
+
 def test_execute_csv_routes_data(empty_ledger):
     r = handle(empty_ledger, "帮我分析csv\nname,score\nA,10\nB,20", {})
     assert "数据分析" in r

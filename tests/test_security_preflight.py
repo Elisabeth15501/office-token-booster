@@ -14,16 +14,13 @@ from security_preflight import scan_file, main  # noqa: E402
 
 
 def _write(content, name="sample.py"):
-    # NamedTemporaryFile 会忽略 name 参数并生成随机文件名，
-    # 但安全预检的豁免是基于 path.name 判定的，因此必须把文件
-    # 真正命名为传入的 basename，否则豁免（如 R2 联网白名单）不生效。
-    tmp = tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, encoding="utf-8")
-    tmp.write(content)
-    tmp.close()
-    target = Path(tmp.name).with_name(name)
-    if target != Path(tmp.name):
-        os.rename(tmp.name, target)
-    return target
+    # 安全预检的豁免/命中是基于 path.name 判定的，因此必须把文件
+    # 真正命名为传入的 basename（如 skillhub_client.py 触发 R2 联网白名单豁免）。
+    # 写入独立临时子目录，避免与 TEMP 中同名残留文件重名导致 rename 冲突。
+    d = tempfile.mkdtemp(prefix="preflight_")
+    p = Path(d) / name
+    p.write_text(content, encoding="utf-8")
+    return p
 
 
 @pytest.mark.smoke

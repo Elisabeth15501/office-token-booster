@@ -101,32 +101,29 @@ def _parse_numbers(text):
     return tokens, minutes
 
 
-_BASE_TOKEN_RE = re.compile(
-    r"(基准|手搓|baseline|笨办法)[^\d]*?(\d[\d,]*\.?\d*)\s*(万|千|k|w)?\s*(?:个\s*)?(token|tokens|Token|TOKEN)", re.I)
-_BASE_MIN_RE = re.compile(
-    r"(基准|手搓|baseline|笨办法)[^\d]*?(\d[\d,]*\.?\d*)\s*(万|千|k|w)?\s*(?:个\s*)?(分钟|分|min|mins)", re.I)
+_BASE_HEAD_RE = re.compile(r"(基准|手搓|baseline|笨办法)", re.I)
 
 
 def _parse_baseline(text):
     """从确认话里抽 baseline 成本（基准 / 手搓 / baseline / 笨办法 前缀的 token/分钟）。
 
     与 _parse_numbers 区分：用户说「确认 baseline 12000 token 25分钟」时，
-    12000/25 应归 baseline 而非 skill 消耗。baseline 词在成本数字之前，
-    故用独立正则（不依赖 _parse_number 的「数字 + 关键词」拼接）。
+    12000/25 都应归 baseline 而非 skill 消耗。
+
+    修复 Bug #1：旧实现用两条独立正则各要求「触发词紧贴数字」，导致紧凑写法里
+    被 token 隔开的分钟（如「…token 25分钟」）匹配失败、反被当作 skill 分钟写入。
+    现改为段式解析——锁定首个触发词之后的子串，在该子串内用通用 _parse_number
+    解析 token/分钟，使「触发词 … token … 分钟」任意间隔都正确归 baseline。
     """
-    def _grab(rx):
-        m = rx.search(text or "")
-        if not m:
-            return None
-        raw = m.group(2).replace(",", "")
-        if raw in ("", "."):
-            return None
-        try:
-            val = float(raw)
-        except ValueError:
-            return None
-        return int(val * _UNIT_MULT.get((m.group(3) or "").lower(), 1))
-    return _grab(_BASE_TOKEN_RE), _grab(_BASE_MIN_RE)
+    if not text:
+        return None, None
+    head = _BASE_HEAD_RE.search(text or "")
+    if not head:
+        return None, None
+    seg = text[head.end():]  # 仅在该触发词之后的子串里解析，避免误吞触发词之前的数字
+    t = _parse_number(seg, r"(?:个\s*)?(?:token|tokens|Token|TOKEN)")
+    m = _parse_number(seg, r"(?:分钟|分|min|mins)")
+    return t, m
 
 
 def _detect_type(text, diag):

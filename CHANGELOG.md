@@ -4,6 +4,16 @@
 
 ---
 
+## v0.9.8 — Bug #1 修复：baseline 分钟误归 skill（2026-09-02）
+
+- **修复 `conversation._parse_baseline`**：紧凑写法 `确认 baseline 12000 token 25分钟` 中的「25分钟」此前被 `_parse_numbers` 误判为 skill 分钟写入账本（baseline_minutes=0, skill_minutes=25）。改为**段式解析**——锁定首个 baseline 触发词（基准/手搓/baseline/笨办法）之后的子串，在该子串内统一解析 token/分钟，使「触发词 … token … 分钟」任意间隔都正确归 baseline。
+- **回归测试**：`tests/test_v097_execute.py::test_execute_baseline_minutes_not_misrouted` 锁定 `baseline_tokens=12000 / baseline_minutes=25 / skill_*=0`。
+- **测试健壮性**：`test_security_preflight._write` 改用独立临时子目录写入，杜绝 TEMP 同名残留导致的 rename 冲突（FileExistsError）。
+- 全套测试 138 passed，零回归。
+- 版本号 `0.9.7 → 0.9.8`（config.yaml / SKILL.md）。
+
+---
+
 ## v0.9.7 — Phase 3 落地：execute 意图路由 + 安全预检 + QUICKSTART（2026-08-26）
 
 完成 **Phase 3** 三项内容（原计划 10–11 月，提前至 v0.9.7），并补上独立快速开始文档。
