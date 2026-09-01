@@ -53,6 +53,28 @@ def test_detect_secret():
         p.unlink()
 
 
+def test_detect_import_bypass():
+    """回归：对抗式审查 C2——__import__('os').system(...) 必须被 R1 拦下
+    （旧正则仅认 eval/exec/os.system，__import__ 可等价绕过）。"""
+    p = _write('__import__("os").system("rm -rf /")\n')
+    try:
+        reds, _ = scan_file(p)
+        assert any("R1" in r for r in reds), reds
+    finally:
+        p.unlink()
+
+
+def test_detect_socket_network():
+    """回归：对抗式审查 C2/R2——socket.create_connection 必须被 R2 拦下
+    （旧正则仅认 socket.socket，裸 socket 联网可绕过）。"""
+    p = _write('import socket\ns = socket.create_connection(("1.2.3.4", 80))\n')
+    try:
+        reds, _ = scan_file(p)
+        assert any("R2" in r for r in reds), reds
+    finally:
+        p.unlink()
+
+
 def test_network_allowed_skip():
     """联网搜索客户端（设计内允许联网）应豁免 R2。"""
     p = _write("import urllib.request\nurllib.request.urlopen('http://x')\n", "skillhub_client.py")

@@ -69,6 +69,21 @@ def test_execute_baseline_minutes_not_misrouted(empty_ledger):
     assert t["skill_minutes"] == 0, "bug#1: 分钟不应错归 skill_minutes"
 
 
+def test_execute_confirm_keeps_skill_cost_with_baseline(empty_ledger):
+    """回归：对抗式审查 C1——同句给 skill+baseline 时，用户显式 skill 成本
+    不得被静默丢弃（旧实现：base_t 非空即不写回 skill，导致 1800 丢失）。"""
+    st = {}
+    handle(empty_ledger, "帮我写周报：完成需求评审", st)
+    handle(empty_ledger, "确认 花了1800 token 5分钟 baseline 12000 token 25分钟", st)
+    tasks = json.load(open(empty_ledger, encoding="utf-8"))["tasks"]
+    assert len(tasks) == 1, "mixed skill+baseline 应写回"
+    t = tasks[0]
+    assert t["skill_tokens"] == 1800, "C1: 用户显式 skill 成本被静默丢弃"
+    assert t["skill_minutes"] == 5, "C1: skill 分钟被静默丢弃"
+    assert t["baseline_tokens"] == 12000
+    assert t["baseline_minutes"] == 25
+
+
 def test_execute_csv_routes_data(empty_ledger):
     r = handle(empty_ledger, "帮我分析csv\nname,score\nA,10\nB,20", {})
     assert "数据分析" in r

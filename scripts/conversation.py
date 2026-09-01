@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""conversation.py — office-token-booster 对话编排层（B 线 v0.5）
+"""conversation.py — office-token-booster 对话编排层（方向 B）
 
 把三个既有外壳（qa 追问 / report_engine 报告 / ledger_agent 写回）串成
 单一对话流：用户说一句，本层理解意图、调用对应的内核能力，必要时建议记账。
@@ -104,26 +104,24 @@ def _parse_numbers(text):
 _BASE_HEAD_RE = re.compile(r"(基准|手搓|baseline|笨办法)", re.I)
 
 
-def _parse_baseline(text):
-    """从确认话里抽 baseline 成本（基准 / 手搓 / baseline / 笨办法 前缀的 token/分钟）。
+def _parse_skill_and_baseline(text):
+    """把确认话按首个 baseline 触发词切成两段，各自独立解析 token/分钟。
 
-    与 _parse_numbers 区分：用户说「确认 baseline 12000 token 25分钟」时，
-    12000/25 都应归 baseline 而非 skill 消耗。
+    触发词（基准/手搓/baseline/笨办法）之前的片段当作 skill 成本，
+    之后的片段当作 baseline 成本。两段互不吞，解决「同时给 skill+baseline
+    时 skill 被静默丢弃」的数据丢失问题（对抗式审查 C1）。
 
-    修复 Bug #1：旧实现用两条独立正则各要求「触发词紧贴数字」，导致紧凑写法里
-    被 token 隔开的分钟（如「…token 25分钟」）匹配失败、反被当作 skill 分钟写入。
-    现改为段式解析——锁定首个触发词之后的子串，在该子串内用通用 _parse_number
-    解析 token/分钟，使「触发词 … token … 分钟」任意间隔都正确归 baseline。
+    返回 (skill_tokens, skill_minutes, baseline_tokens, baseline_minutes)，
+    未解析到的维度为 None。
     """
-    if not text:
-        return None, None
     head = _BASE_HEAD_RE.search(text or "")
-    if not head:
-        return None, None
-    seg = text[head.end():]  # 仅在该触发词之后的子串里解析，避免误吞触发词之前的数字
-    t = _parse_number(seg, r"(?:个\s*)?(?:token|tokens|Token|TOKEN)")
-    m = _parse_number(seg, r"(?:分钟|分|min|mins)")
-    return t, m
+    skill_seg = text[:head.start()] if head else (text or "")
+    base_seg = text[head.end():] if head else ""
+    st = _parse_number(skill_seg, r"(?:个\s*)?(?:token|tokens|Token|TOKEN)")
+    sm = _parse_number(skill_seg, r"(?:分钟|分|min|mins)")
+    bt = _parse_number(base_seg, r"(?:个\s*)?(?:token|tokens|Token|TOKEN)")
+    bm = _parse_number(base_seg, r"(?:分钟|分|min|mins)")
+    return st, sm, bt, bm
 
 
 def _detect_type(text, diag):
@@ -302,16 +300,17 @@ def handle(ledger_path, text, state):
             return answer_followup(diag, text)
         # Phase 3：确认时允许补充成本（execute 场景常在此补 baseline）；
         # 同时做成本完整性护栏，避免 execute 无成本时写入全 0 污染账本。
-        bt, bm = _parse_numbers(text)
-        base_t, base_m = _parse_baseline(text)
+        # 分段解析：baseline 触发词之前=skill 段、之后=baseline 段，互不吞
+        # （修复对抗式审查 C1：同句给 skill+baseline 时 skill 不再被静默丢弃）。
+        st, sm, base_t, base_m = _parse_skill_and_baseline(text)
         if base_t is not None:
             pending["baseline_tokens"] = base_t
         if base_m is not None:
             pending["baseline_minutes"] = base_m
-        if bt is not None and base_t is None:
-            pending["skill_tokens"] = bt
-        if bm is not None and base_m is None:
-            pending["skill_minutes"] = bm
+        if st is not None:
+            pending["skill_tokens"] = st
+        if sm is not None:
+            pending["skill_minutes"] = sm
         _st = pending.get("skill_tokens")
         _bt = pending.get("baseline_tokens")
         if (_st in (None, 0)) and (_bt in (None, 0)):
@@ -439,7 +438,7 @@ def _do_execute(ledger_path, text, state, diag):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="办公室提效 · 对话式自动记账编排（office-token-booster v0.5）")
+        description="办公室提效 · 对话式自动记账编排（office-token-booster）")
     parser.add_argument("ledger", nargs="?", help="账本 JSON 路径")
     parser.add_argument("--ledger", dest="ledger", help="账本 JSON 路径（同位置参数）")
     args = parser.parse_args()
@@ -456,7 +455,7 @@ def main():
         return 2
 
     state = {}
-    print("=== 办公室提效对话（v0.5 · 类型字典消歧）===")
+    print("=== 办公室提效对话（执行 + 自动记账）===")
     print('试试：我刚生成了周报，花了1800 token 5分钟 ｜ 哪个类型省最多？ '
           '｜ 生成摘要 ｜ 待自动化建议 ｜ 退出')
     while True:

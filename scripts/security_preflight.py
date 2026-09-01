@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""security_preflight.py — office-token-booster 执行层安全预检（CI 红线）
+"""security_preflight.py — office-token-booster 执行层安全预检（CI 轻量闸门）
 
-扫描指定目录的 .py 源码，检测执行层四红线：
-  R1 危险执行：eval( / exec( / os.system / subprocess 调用（非白名单）
-  R2 网络外发：urllib.request / requests / http.client / socket / smtp / urlopen
-  R3 硬编码密钥：AKIA* / sk-* / ghp_* / xox* / JWT / password=明文 等
+扫描指定目录的 .py 源码，按执行层四红线做**轻量静态启发式**检查：
+  R1 危险执行：eval( / exec( / os.system / subprocess / __import__(
+  R2 网络外发：urllib / requests / http.client / socket / smtp / urlopen 等
+  R3 硬编码密钥：AKIA* / sk-* / ghp_* / xox* / JWT / password=/api_key=/token= 等
   R4 字段转义（警告级）：对外输出用户字段处是否使用 html.escape
 
 退出码：0 = 通过（无红线）；1 = 命中红线（CI 应 fail）。
+
+⚠️ 这是**浅层正则扫描，不是安全保证**：可被拆分字符串、环境变量、动态拼接、
+十六进制/编码绕过。它的价值是拦住「手滑把密钥/危险调用直接写进仓库」的低级错误，
+而非对抗蓄意绕过。请勿在文档/承诺中称其为「零风险保证」。
 
 设计原则：纯标准库、无第三方依赖、无网络、无副作用，可被 CI 直接调用。
 """
@@ -20,22 +24,34 @@ import sys
 from pathlib import Path
 
 # R1：危险执行（排除 execute_render / executor / _do_execute 等合法标识符）
+# 注意：不收录裸 compile( —— re.compile( 在几乎所有文件出现，会全量误报。
+# __import__( 是本次加固重点（可等价 os.system 跑任意代码，旧正则漏检）；
+# 但仅匹配危险目标模块，避免误伤 __import__("sys").stderr 这类良性用法。
 _RE_DANGER_EXEC = re.compile(
     r"(?<![\w.])(eval|exec)\s*\(|(?<![\w.])os\.system\s*\("
-    r"|(?<![\w.])subprocess\.(?:call|run|Popen|check_output|check_call)\s*\(")
-# R2：网络外发
+    r"|(?<![\w.])subprocess\.(?:call|run|Popen|check_output|check_call)\s*\("
+    r"|(?<![\w.])__import__\s*\(\s*[\"'](?:os|subprocess|builtins|ctypes|"
+    r"importlib|shutil|socket|pickle|codecs|marshal)[\"']")
+# R2：网络外发（socket. 覆盖 socket.socket / create_connection / connect 等；
+# 另补 urllib3 / pycurl / grpc / websocket / httplib2 等常见客户端）
 _RE_NETWORK = re.compile(
-    r"\b(urllib\.request|requests|http\.client|aiohttp|httpx|smtplib|"
-    r"socket\.socket|urlopen|urlretrieve)\b")
-# R3：硬编码密钥 / 明文凭证
+    r"\b(urllib\.request|urllib\.parse|requests|http\.client|aiohttp|httpx|smtplib|"
+    r"socket\.|urlopen|urlretrieve|urllib3|pycurl|grpc|websocket|httplib2)\b")
+# R3：硬编码密钥 / 明文凭证（轻量启发式，非安全保证——详见模块 docstring）
 _RE_SECRET = re.compile(
     r"(AKIA[0-9A-Z]{16}"
     r"|sk-[A-Za-z0-9]{20,}"
     r"|ghp_[A-Za-z0-9]{36}"
     r"|xox[baprs]-[A-Za-z0-9-]{10,}"
     r"|eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}"
-    r"|password\s*=\s*[\"'][^\"']{8,}[\"']"
-    r"|secret\s*=\s*[\"'][^\"']{8,}[\"'])")
+    r"|password\s*=\s*[\"'][^\"']{4,}[\"']"
+    r"|secret\s*=\s*[\"'][^\"']{4,}[\"']"
+    r"|api[_-]?key\s*=\s*[\"'][^\"']{4,}[\"']"
+    r"|access[_-]?token\s*=\s*[\"'][^\"']{4,}[\"']"
+    r"|client[_-]?secret\s*=\s*[\"'][^\"']{4,}[\"']"
+    r"|private[_-]?key\s*=\s*[\"'][^\"']{4,}[\"']"
+    r"|token\s*=\s*[\"'][^\"']{4,}[\"']"
+    r"|pwd\s*=\s*[\"'][^\"']{4,}[\"'])")
 # R4：字段转义（仅做信息/警告统计，不 fail）
 _RE_ESCAPE = re.compile(r"html\.escape")
 _RE_IMPORT_HTML = re.compile(r"^\s*import\s+html|from\s+html\s+import", re.M)

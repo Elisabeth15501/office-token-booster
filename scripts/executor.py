@@ -21,7 +21,7 @@ import io
 import json
 import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -169,7 +169,7 @@ def render_weekly_report(text: str) -> str:
 # 模块 2：会议纪要
 # ---------------------------------------------------------------------------
 _ACTION_RE = re.compile(r"待办|行动|action|todo|跟进|负责人|@|owner", re.I)
-_DECISION_RE = re.compile(r"结论|决定|决议|agree|decision|确认", re.I)
+_DECISION_RE = re.compile(r"结论|决定|决议|agree|decision", re.I)
 _OPEN_RE = re.compile(r"遗留|待定|未决|open|悬而未决", re.I)
 _ATTENDEE_RE = re.compile(r"参会|出席|列席|attendee|背景|主题", re.I)
 
@@ -314,8 +314,6 @@ def render_ppt_outline(text: str) -> str:
     lines = _lines(text)
     title = lines[0] if lines else "未命名主题"
     bullets = lines[1:] if len(lines) > 1 else []
-    # 把要点按 ~4 条一组切成内容页
-    chunks = [bullets[i : i + 4] for i in range(0, len(bullets), 4)] or [["（补充要点）"]]
 
     out = ["# 幻灯片大纲", "", f"**主题**：{title}", ""]
     out += ["## Slide 1 · 封面", f"- 标题：{title}", "- 副标题：office-token-booster 执行引擎生成", ""]
@@ -349,16 +347,15 @@ EXECUTORS = _DISPATCH
 def execute_render(task_type: str, text: str) -> Tuple[bool, str]:
     """按标准类型名渲染交付物。返回 (是否成功, 内容或错误说明)。
 
-    供 conversation 的 execute 意图路由调用；不写盘、不联网、不读密钥，
-    纯本地渲染，符合执行层零依赖红线。
+    委托 execute()（单一渲染入口），把其 ValueError 转成 (False, 说明)，
+    避免两套分发逻辑漂移。供 conversation 的 execute 意图路由调用；
+    不写盘、不联网、不读密钥，纯本地渲染，符合执行层零依赖红线。
     """
-    fn = EXECUTORS.get(task_type)
-    if not fn:
-        return False, f"暂不支持的任务类型：{task_type}（支持：{', '.join(EXECUTORS)}）"
     try:
-        return True, fn(text)
-    except Exception as e:  # pragma: no cover - 渲染异常兜底
-        return False, f"渲染失败：{e}"
+        md, _ = execute(task_type, text)
+    except ValueError as e:
+        return False, str(e)
+    return True, md
 
 
 def execute(task_type: str, text: str) -> tuple[str, dict]:

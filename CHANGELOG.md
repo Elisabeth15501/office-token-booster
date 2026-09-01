@@ -4,6 +4,23 @@
 
 ---
 
+## v0.9.9 — 对抗式审查整改：确认写回数据丢失 + 安全预检闸门加固（2026-09-02）
+
+- **[C1] 修复确认写回静默丢弃 skill 成本（数据丢失）**：`conversation` 的 `confirm` 分支此前用「base_t 非空即不写回 skill」的互斥逻辑，导致同句同时给 skill+baseline（如 `确认 花了1800 token 5分钟 baseline 12000 token 25分钟`）时，用户显式输入的 skill 成本被吃掉、账本只记 baseline。改为**分段解析**——按首个 baseline 触发词切分，触发词之前=skill 段、之后=baseline 段，各自独立 `_parse_numbers`，互不吞。回归测试 `test_execute_confirm_keeps_skill_cost_with_baseline` 锁定 `skill_tokens=1800 / skill_minutes=5 / baseline=12000/25`。
+- **[C2] 加固安全预检红线（CI 闸门此前名不副实）**：
+  - R1 补 `__import__("os"|"subprocess"|"builtins"|...)` 危险目标模块（旧正则仅认 `eval/exec/os.system/subprocess`，`__import__("os").system(...)` 可等价绕过）。仅匹配危险目标，避免误伤 `print(..., file=__import__("sys").stderr)` 等良性用法。
+  - R2 将 `socket.socket` 扩为 `socket.`（覆盖 `create_connection`/`connect`），并补 `urllib3/pycurl/grpc/websocket/httplib2` 等客户端（旧正则漏掉裸 socket 联网）。
+  - R3 放宽密钥长度门槛（8→4 字符）并新增 `api_key=/access_token=/client_secret=/private_key=/token=/pwd=` 赋值模式检测。
+  - **文档去夸大**：模块 docstring 明确这是「轻量静态启发式，非安全保证」，可被字符串拆分/环境变量/编码绕过，仅拦低级手滑，不在承诺中称「零风险」。
+- **[R1] 会议纪要 `_DECISION_RE` 移除过宽关键词「确认」**（极常见中文词，导致「请确认参会」等行被误判为核心结论）。
+- **[R3/R4] 清理死代码**：删除 `render_ppt_outline` 从未使用的 `chunks` 变量；移除 `executor.py` 未使用的 `field` 导入。
+- **[R5] 更新过期版本字符串**：`conversation.py` 文档/argparse banner 中残留的「v0.5」改掉（项目已 v0.9.x）。
+- **[R6] 统一渲染入口**：`execute_render` 改为委托 `execute()`（单一渲染源），消除两套分发逻辑漂移；`execute()` 仍是返回 `(md, meta)` 的主入口（host_hook / 测试 / CLI 共用）。
+- 全套测试 **142 passed**（原 139 + 新增 3 例：R1 `__import__` 命中、R2 `socket` 命中、C1 mixed skill+baseline 不丢成本），`scripts/` 安全预检 EXIT=0。
+- 版本号 `0.9.8 → 0.9.9`（config.yaml / SKILL.md）。
+
+---
+
 ## v0.9.8 — Bug #1 修复：baseline 分钟误归 skill（2026-09-02）
 
 - **修复 `conversation._parse_baseline`**：紧凑写法 `确认 baseline 12000 token 25分钟` 中的「25分钟」此前被 `_parse_numbers` 误判为 skill 分钟写入账本（baseline_minutes=0, skill_minutes=25）。改为**段式解析**——锁定首个 baseline 触发词（基准/手搓/baseline/笨办法）之后的子串，在该子串内统一解析 token/分钟，使「触发词 … token … 分钟」任意间隔都正确归 baseline。
