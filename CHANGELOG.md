@@ -4,6 +4,29 @@
 
 ---
 
+## v0.9.10 — 对抗式审查 S 级清理（S1–S7）+ 质量门禁 P1 脏数据修复（2026-09-02）
+
+对抗式审查的 7 条 S 级（建议级）问题全部清零（纯工程清理、行为向下兼容），并补刀时间线五-B「质量门禁」flagged 的 **P1 字符串脏数据崩溃**：
+
+### S 级建议清理（S1–S7）
+- **[S1] REPL 双重 classify**：`conversation.main()` 此前在 `handle()` 内部 classify 一次、循环里又 `classify(line)` 一次（浪费 + 语义双源）。改为 `handle()` 接受可选 `intent` 参数，REPL 只算一次意图并透传。
+- **[S2] `_do_execute` 冗余 `propose_entry`**：execute 意图下只为取 `date/note` 就跑了一整遍 `propose_entry`（含历史均值估算），其 `meta` 警告还被丢弃。改为直接构造 pending（今日日期 + 空备注），消除无谓计算。
+- **[S3] `analyze_csv` 静默丢单元格**：ragged 行缺列 / 空单元格 / 数值列里的非数字此前被直接忽略、不告知。现累计 `dropped_ragged/empty/nonnum` 并在报告末尾披露「本次忽略 N 个单元格/单元」，让用户**看清**数据完整性（对齐北极星）。
+- **[S4] HTML 转义校验**：复核 `report_engine.generate_html_report` 与 `executor._md_to_html`，所有用户字段（task_type/date/type/insights/recs/caveats）均经 `html.escape`；`_md_to_html` 先转义再注入 `<b>`，`<script>` 被转义为实体。新增回归测试锁定。
+- **[S5] `export_docx` Intense Quote 样式缺失崩溃**：模板/Word 版本可能无「Intense Quote」样式，旧代码直接 `style="Intense Quote"` 会抛错。改为 `try/except` 回退默认段落样式（与表格样式降级一致）。
+- **[S6] 热路径正则重复编译**：`_parse_number` 每次调用都拼接+编译正则；`_detect_type` 的短语抓取正则每次 `classify` 都重建。将 `_NUM_PREFIX_RE / _TOKEN_KW_RE / _MIN_KW_RE / _TYPE_EXTRACT_RE` 提到模块级预编译，调用处仅做关键词邻接校验。
+- **[S7] `render_weekly_report` 函数内正则重建**：`_ANCHORS` 与兜底关键词原在每次渲染时 `re.compile`。提到模块级 `_WEEKLY_ANCHOR_PATTERNS / _RE_WEEKLY_*_KW / _RE_SPLIT_SEMICOLON` 预编译。
+
+### 质量门禁 P1：脏数据崩溃
+- **根因**：`diagnose()` 与 `report_engine` 直接对 `t.get("baseline_tokens", 0) or 0` 做加减，字符串值经 `or 0` 仍为真字符串，下游 `int ± str` 抛 TypeError（写回路径 `int()` 强转曾掩盖，读/计算路径未防护，异常账本仍会崩溃）。
+- **修复**：在 `diagnose()` 读边界新增 `_normalize_tasks()`（配套 `_as_int()`），把 4 个数值字段统一 coerce 为 int（int/float/数字串 → int；None/空/非数字 → 0），入参不被改动；`report_engine` 消费归一化后的 `s.tasks`，渲染层一并免疫。
+- **回归测试**：新增 `tests/test_p1_dirty_data.py`（字符串/缺失/非数字三类脏数据断言不崩溃且聚合正确）+ `tests/test_v095_s_suggestions.py`（覆盖 S1–S7，含 S2 断言 execute 不调用 `propose_entry`、S5 断言样式缺失回退、S3 断言脏数据披露）。
+
+- 新增回归测试 `tests/test_v095_s_suggestions.py` 覆盖 S1–S7（含 S2 用 monkeypatch 断言 execute 路径不调用 `propose_entry`、S5 注入缺失样式断言回退、S3 注入脏数据断言披露）。
+- 版本号 `0.9.9 → 0.9.10`（config.yaml / SKILL.md）。
+
+---
+
 ## v0.9.9 — 对抗式审查整改：确认写回数据丢失 + 安全预检闸门加固（2026-09-02）
 
 - **[C1] 修复确认写回静默丢弃 skill 成本（数据丢失）**：`conversation` 的 `confirm` 分支此前用「base_t 非空即不写回 skill」的互斥逻辑，导致同句同时给 skill+baseline（如 `确认 花了1800 token 5分钟 baseline 12000 token 25分钟`）时，用户显式输入的 skill 成本被吃掉、账本只记 baseline。改为**分段解析**——按首个 baseline 触发词切分，触发词之前=skill 段、之后=baseline 段，各自独立 `_parse_numbers`，互不吞。回归测试 `test_execute_confirm_keeps_skill_cost_with_baseline` 锁定 `skill_tokens=1800 / skill_minutes=5 / baseline=12000/25`。

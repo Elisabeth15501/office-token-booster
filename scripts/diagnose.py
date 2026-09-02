@@ -51,6 +51,33 @@ def _safe_div(a, b):
     return (a / b) if b else 0.0
 
 
+# 数值字段归一化：账本 JSON 可能被用户手改 / 外部导入成字符串（如 "5000"）、
+# 缺失或非数字，下游 `int + str` 会直接 TypeError 崩溃（质量门禁 P1）。
+# 在读边界统一 coerce，保证内核与渲染层永不因脏数据崩溃。
+_NUM_FIELDS = ("baseline_tokens", "skill_tokens", "baseline_minutes", "skill_minutes")
+
+
+def _as_int(x):
+    """安全转 int：int/float/数字字符串 -> int；None/空/非数字 -> 0。"""
+    try:
+        return int(float(x))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _normalize_tasks(tasks):
+    """返回归一化后的 task 列表（不改动入参）；数值字段统一为 int。"""
+    norm = []
+    for t in (tasks or []):
+        if not isinstance(t, dict):
+            continue
+        nt = dict(t)
+        for k in _NUM_FIELDS:
+            nt[k] = _as_int(nt.get(k))
+        norm.append(nt)
+    return norm
+
+
 def load_ledger(path):
     """读取用户提供的账本 JSON，返回 tasks 列表。"""
     if not Path(path).is_file():
@@ -387,6 +414,7 @@ def diagnose(tasks):
 
     不读取文件、不渲染、无副作用，可被对话式诊断与长链路 Agent 复用。
     """
+    tasks = _normalize_tasks(tasks)
     s = compute_summary(tasks)
     insights, recs = build_insights(s)
     caveats = detect_baseline_anomalies(tasks)

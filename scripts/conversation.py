@@ -27,6 +27,7 @@ import argparse
 import json
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # 允许从任意目录运行（与 qa / report_engine / ledger_agent 保持一致的 sibling import）。
@@ -71,33 +72,50 @@ _REGISTRY = _load_registry()
 # 中文数量单位 → 乘数（万/千/k 常见）。
 _UNIT_MULT = {"万": 10 ** 4, "千": 10 ** 3, "k": 10 ** 3, "w": 10 ** 4}
 
+# ── S6：热路径正则预编译（classify/parse 高频调用，避免每次重新拼接+编译）──
+# 数字前缀（与单位/关键词解耦）：抽取「数字+可选单位」。
+_NUM_PREFIX_RE = re.compile(r"(\d[\d,]*\.?\d*)\s*(万|千|k|w)?")
+# 关键词正则：数字须紧邻其后的关键词才命中（保留原语义，杜绝遥远处误命中）。
+_TOKEN_KW_RE = re.compile(r"\s*(?:个\s*)?(?:token|tokens|Token|TOKEN)", re.I)
+_MIN_KW_RE = re.compile(r"\s*(?:分钟|分|min|mins)", re.I)
+# 类型抽取（v0.5 短语抓取）：预编译单行正则，消除 classify 每次重建。
+_TYPE_EXTRACT_RE = re.compile(
+    r"(?:记一笔|记录|记账|记一下|记上|登记|添加任务|新增任务|记下来|写进账本|"
+    r"生成了|做了|完成了|写好?了|做好?了|产出|整理|搞完?了)\s*"
+    r"([一-龥A-Za-z0-9]{1,12}?)"
+    r"(?=\s*(?:花了|用了|耗时|花费|消耗|占|，|,|。|\.|$))"
+)
+
 
 def _parse_number(text, keyword_re):
-    """从 text 里抽一个带可选单位（万/千/k）的数字，返回 int；抽不到/解析失败返回 None。
+    """从 text 抽取一个带可选单位（万/千/k）的数字，返回 int。
 
-    健壮性（修复 H1）：
-    - 支持小数：『200.5 token』→ 200（不再 int('200.5') 崩溃）；
-    - 支持单位：『1.5万 token』→ 15000（不再静默丢单位）；
-    - 解析失败（畸形输入）不抛异常，返回 None。
+    keyword_re 必须是预编译的关键词正则（_TOKEN_KW_RE / _MIN_KW_RE），
+    要求数字后紧邻该关键词（保留原语义，避免关键词遥远处误命中）。
+    抽不到/解析失败返回 None，绝不抛异常（修复 H1）。
+
+    _NUM_PREFIX_RE 在模块级预编译，仅在调用处做关键词邻接校验，
+    消除每次解析都重新拼接+编译正则的开销（S6）。
     """
-    m = re.search(r"(\d[\d,]*\.?\d*)\s*(万|千|k|w)?\s*" + keyword_re, text, re.I)
-    if not m:
-        return None
-    raw = m.group(1).replace(",", "")
-    if raw in ("", "."):
-        return None
-    try:
-        val = float(raw)
-    except ValueError:
-        return None
-    unit = (m.group(2) or "").lower()
-    return int(val * _UNIT_MULT.get(unit, 1))
+    for m in _NUM_PREFIX_RE.finditer(text or ""):
+        rest = text[m.end():]
+        if keyword_re.match(rest):
+            raw = m.group(1).replace(",", "")
+            if raw in ("", "."):
+                continue
+            try:
+                val = float(raw)
+            except ValueError:
+                continue
+            unit = (m.group(2) or "").lower()
+            return int(val * _UNIT_MULT.get(unit, 1))
+    return None
 
 
 def _parse_numbers(text):
     """从自然语句里抽 token / 分钟数，抽不到返回 None（不崩溃）。"""
-    tokens = _parse_number(text, r"(?:个\s*)?(?:token|tokens|Token|TOKEN)")
-    minutes = _parse_number(text, r"(?:分钟|分|min|mins)")
+    tokens = _parse_number(text, _TOKEN_KW_RE)
+    minutes = _parse_number(text, _MIN_KW_RE)
     return tokens, minutes
 
 
@@ -117,10 +135,10 @@ def _parse_skill_and_baseline(text):
     head = _BASE_HEAD_RE.search(text or "")
     skill_seg = text[:head.start()] if head else (text or "")
     base_seg = text[head.end():] if head else ""
-    st = _parse_number(skill_seg, r"(?:个\s*)?(?:token|tokens|Token|TOKEN)")
-    sm = _parse_number(skill_seg, r"(?:分钟|分|min|mins)")
-    bt = _parse_number(base_seg, r"(?:个\s*)?(?:token|tokens|Token|TOKEN)")
-    bm = _parse_number(base_seg, r"(?:分钟|分|min|mins)")
+    st = _parse_number(skill_seg, _TOKEN_KW_RE)
+    sm = _parse_number(skill_seg, _MIN_KW_RE)
+    bt = _parse_number(base_seg, _TOKEN_KW_RE)
+    bm = _parse_number(base_seg, _MIN_KW_RE)
     return st, sm, bt, bm
 
 
@@ -153,14 +171,9 @@ def _detect_type(text, diag):
                 return std, False
 
     # 3. 短语抓取：显式记账词（『记一笔 X』）或被动完成信号（『生成了周报』『做了个PPT』）
-    #    用前瞻断言在成本词/标点前截断类型名，避免『记一笔』被拆成『笔』
-    m = re.search(
-        r"(?:记一笔|记录|记账|记一下|记上|登记|添加任务|新增任务|记下来|写进账本|"
-        r"生成了|做了|完成了|写好?了|做好?了|产出|整理|搞完?了)\s*"
-        r"([一-龥A-Za-z0-9]{1,12}?)"
-        r"(?=\s*(?:花了|用了|耗时|花费|消耗|占|，|,|。|\.|$))",
-        text,
-    )
+    #    用前瞻断言在成本词/标点前截断类型名，避免『记一笔』被拆成『笔』。
+    #    正则已提到模块级 _TYPE_EXTRACT_RE（S6，不再每次重建）。
+    m = _TYPE_EXTRACT_RE.search(text)
     cand = m.group(1).strip() if m else None
     if cand:
         # 3a. 账本已知类型模糊（如 cand='周报' 命中 '周报生成'）
@@ -274,12 +287,14 @@ def classify(text):
 # 路由
 # ─────────────────────────────────────────────────────────────
 
-def handle(ledger_path, text, state):
+def handle(ledger_path, text, state, intent=None):
     """对话主路由。state 是调用方维护的 dict（至少含可选 "pending"）。
 
     返回中文回复字符串。本函数不读 stdin、不写 stdout，方便上层直接调用。
+    intent 可选：调用方（如 REPL）已算好的意图，避免重复 classify（S1）。
     """
-    intent = classify(text)
+    if intent is None:
+        intent = classify(text)
 
     if intent == "exit":
         return "再见，账本已保留。"
@@ -409,17 +424,18 @@ def _do_execute(ledger_path, text, state, diag):
     if not ok:
         return rendered
 
-    # 自动 propose 记账（dry-run 预览，存 pending；skill_tokens 来自宿主真实消耗，
-    # 本地 CLI 执行时用户未提供则留 None，确认写回时由护栏要求补 baseline）。
-    entry, meta = propose_entry(diag, etype, skill_tokens=None, skill_minutes=None)
+    # 自动 propose 记账（dry-run 预览，存 pending）。执行场景本地 CLI 不持有真实消耗，
+    # skill 维度留 None，确认写回时由护栏要求补 baseline（P0 不破）。
+    # 注意：此处无需调用 propose_entry —— 只取日期与空备注即可，避免为「历史均值估算」
+    # 做无谓计算（其 meta 警告本就被丢弃）—— S2 修复：消除 _do_execute 的 propose_entry 浪费。
     state["pending"] = {
         "type": etype,
-        "date": entry["date"],
+        "date": datetime.now().strftime("%Y-%m-%d"),
         "skill_tokens": None,
         "skill_minutes": None,
         "baseline_tokens": None,
         "baseline_minutes": None,
-        "note": entry["note"],
+        "note": "",
     }
     lines = [
         rendered,
@@ -466,8 +482,9 @@ def main():
             break
         if not line:
             continue
-        resp = handle(ledger, line, state)
-        if classify(line) == "exit":
+        intent = classify(line)                       # 仅算一次（S1：消除重复 classify）
+        resp = handle(ledger, line, state, intent)
+        if intent == "exit":
             print("助手> " + resp)
             break
         print("助手> " + resp + "\n")

@@ -111,6 +111,20 @@ def _detect_date_range(text: str) -> str:
 # ---------------------------------------------------------------------------
 # 模块 1：周报生成
 # ---------------------------------------------------------------------------
+# 周报行内锚点前缀（S7：提到模块级预编译，避免每次渲染都重建正则）。
+# 每项 (编译好的正则, 桶名)；桶名在 render_weekly_report 内映射到对应 list。
+_WEEKLY_ANCHOR_PATTERNS = [
+    (re.compile(r"^\s*(风险|阻塞|卡点|问题|blocker|issue)\s*[:：]?", re.I), "risk"),
+    (re.compile(r"^\s*(下周计划|下週计划|下周|下週|计划|规划|plan|todo|后续|待办)\s*[:：]?", re.I), "plan"),
+    (re.compile(r"^\s*(本周概览|本周|概览|摘要|总览|summary|overview)\s*[:：]?", re.I), "overview"),
+]
+# 无显式前缀时的兜底关键词（同样预编译 —— S7）。
+_RE_WEEKLY_PLAN_KW = re.compile(r"下周|下週|计划|规划|plan|todo|后续|待办", re.I)
+_RE_WEEKLY_RISK_KW = re.compile(r"风险|阻塞|卡点|问题|卡住|blocker|issue|待解决", re.I)
+_RE_WEEKLY_OVERVIEW_KW = re.compile(r"概览|摘要|本周|总览|summary|overview", re.I)
+_RE_SPLIT_SEMICOLON = re.compile(r"[；;]")
+
+
 def render_weekly_report(text: str) -> str:
     lines = _lines(text)
     rng = _detect_date_range(text)
@@ -119,38 +133,34 @@ def render_weekly_report(text: str) -> str:
     # 行内锚点前缀：一行内混合多个要点时（如「风险：x；下周：y」），按前缀正确路由，
     # 避免整行被「下周」等关键词抢走而丢失「风险」段（E3 增强）。
     # 长标签优先（如「本周概览」「下周计划」），保证去前缀更干净。
-    _ANCHORS = [
-        (re.compile(r"^\s*(风险|阻塞|卡点|问题|blocker|issue)\s*[:：]?", re.I), risk),
-        (re.compile(r"^\s*(下周计划|下週计划|下周|下週|计划|规划|plan|todo|后续|待办)\s*[:：]?", re.I), plan),
-        (re.compile(r"^\s*(本周概览|本周|概览|摘要|总览|summary|overview)\s*[:：]?", re.I), overview),
-    ]
-
+    # 锚点正则与兜底关键词均已提到模块级（S7，不再每次重建）。
     def classify(sub: str):
         s = sub.strip()
         if not s:
             return None
         # 1) 行内锚点前缀优先（如「风险：…」「下周计划：…」「概览：…」）
-        for pat, bucket in _ANCHORS:
+        for pat, name in _WEEKLY_ANCHOR_PATTERNS:
             if pat.match(s):
                 content = pat.sub("", s).strip() or s
-                return bucket, content
-        # 2) 无显式前缀时，按关键词兜底（与旧逻辑一致）
-        if re.search(r"下周|下週|计划|规划|plan|todo|后续|待办", s, re.I):
-            return plan, s
-        if re.search(r"风险|阻塞|卡点|问题|卡住|blocker|issue|待解决", s, re.I):
-            return risk, s
-        if re.search(r"概览|摘要|本周|总览|summary|overview", s, re.I) and not work:
-            return overview, s
-        return work, s
+                return name, content
+        # 2) 无显式前缀时，按关键词兜底（与旧逻辑一致，关键词已预编译 —— S7）
+        if _RE_WEEKLY_PLAN_KW.search(s):
+            return "plan", s
+        if _RE_WEEKLY_RISK_KW.search(s):
+            return "risk", s
+        if _RE_WEEKLY_OVERVIEW_KW.search(s) and not work:
+            return "overview", s
+        return "work", s
 
+    _buckets = {"risk": risk, "plan": plan, "overview": overview, "work": work}
     for ln in lines:
         # 一行内多个要点用 ；/ ; 分隔时，拆开分别归类（E3 增强核心）
-        for sub in re.split(r"[；;]", ln):
+        for sub in _RE_SPLIT_SEMICOLON.split(ln):
             r = classify(sub)
             if r is None:
                 continue
-            bucket, content = r
-            bucket.append(content)
+            name, content = r
+            _buckets[name].append(content)
 
     out = [f"# 周报（{rng}）", ""]
     if overview:
@@ -246,14 +256,26 @@ def analyze_csv(text_or_path: str) -> str:
     n_cols = len(header)
     n_rows = len(rows)
     col_stats: list[str] = []
+    # S3：静默丢弃计数（ragged 行缺列 / 空单元格 / 数值列里的非数字）。
+    # 旧实现直接忽略这些单元格、不告知用户，导致「看到的统计」可能基于不完整数据。
+    # 现显式累计并在报告末尾披露，让用户「看清」数据损失（对齐北极星：看清成本）。
+    dropped_ragged = 0
+    dropped_empty = 0
+    dropped_nonnum = 0
     out = [f"# 数据分析报告（{n_rows} 行 × {n_cols} 列）", ""]
     out.append(f"**字段**：{', '.join(header)}")
     out.append("")
 
     for i, col in enumerate(header):
-        vals = [r[i] for r in rows if i < len(r) and r[i] != ""]
-        nums = [float(v) for v in vals if _is_number(v)]
+        present = [r[i] for r in rows if i < len(r)]
+        dropped_ragged += (n_rows - len(present))
+        raw_vals = [v for v in present if v != ""]
+        dropped_empty += (len(present) - len(raw_vals))
+        nums = [float(v) for v in raw_vals if _is_number(v)]
+        nonnum = [v for v in raw_vals if not _is_number(v)]
         if nums:
+            # 数值列：非数字单元格无法参与统计，记为丢弃（异常值/占位符）。
+            dropped_nonnum += len(nonnum)
             s = sum(nums)
             avg = s / len(nums)
             mx, mn = max(nums), min(nums)
@@ -263,15 +285,26 @@ def analyze_csv(text_or_path: str) -> str:
                 f"| {col} | 数值 | {len(nums)} | {s:,.2f} | {avg:,.2f} | {mn:,.2f} | {mx:,.2f} | {mid:,.2f} |"
             )
         else:
-            # 类别列：top 值计数
+            # 类别列：非数字即类别值，正常参与计数，不计入丢弃。
             from collections import Counter
 
-            top = Counter(vals).most_common(3)
+            top = Counter(raw_vals).most_common(3)
             top_s = "、".join(f"{k}({c})" for k, c in top) or "（空）"
-            col_stats.append(f"| {col} | 类别 | {len(vals)} | - | - | - | - | {top_s} |")
+            col_stats.append(f"| {col} | 类别 | {len(raw_vals)} | - | - | - | - | {top_s} |")
 
     out += ["## 关键指标", "", "| 字段 | 类型 | 非空数 | 求和 | 均值 | 最小 | 最大 | 中位数/Top |", "|---|---|---|---|---|---|---|---|"]
     out += col_stats
+    # S3：披露数据丢弃情况，便于核对「看到的统计」是否基于完整数据。
+    dropped_total = dropped_ragged + dropped_empty + dropped_nonnum
+    if dropped_total:
+        parts = []
+        if dropped_ragged:
+            parts.append(f"{dropped_ragged} 处行缺列（被跳过）")
+        if dropped_empty:
+            parts.append(f"{dropped_empty} 个空单元格")
+        if dropped_nonnum:
+            parts.append(f"{dropped_nonnum} 个非数字单元格（数值列中按异常忽略）")
+        out += ["", f"> ⚠️ 数据完整性：本次分析忽略 {dropped_total} 个单元格/单元 —— " + "；".join(parts) + "。"]
     out += ["", "> 由 office-token-booster 执行引擎本地计算（不联网、不读密钥）。"]
     return "\n".join(out)
 
@@ -556,7 +589,12 @@ def export_docx(md: str, out_path: str, title: str) -> Tuple[str, str]:
         elif kind == "p":
             doc.add_paragraph(_strip_bold(payload))
         elif kind == "quote":
-            doc.add_paragraph(_strip_bold(payload), style="Intense Quote")
+            # S5：模板/Word 版本可能缺「Intense Quote」样式，缺失时回退默认段落样式，
+            # 避免 export_docx 因 KeyError/ValueError 崩溃（与表格样式降级一致）。
+            try:
+                doc.add_paragraph(_strip_bold(payload), style="Intense Quote")
+            except Exception:  # pragma: no cover - 样式名随 Word 模板变化
+                doc.add_paragraph(_strip_bold(payload))
         elif kind == "ul":
             for it in payload:
                 doc.add_paragraph(_strip_bold(it), style="List Bullet")
