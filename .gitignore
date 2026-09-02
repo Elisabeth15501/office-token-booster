@@ -45,3 +45,7 @@ MANUAL_TEST_v097.md
 tests/manual_run_v097.ps1
 ledger_test*.json
 *.bak
+
+# 本地临时分析与排障文档（不纳入版本控制）
+PUSH_TROUBLESHOOTING.md
+时间线对标与北极星评估_v0911.md
