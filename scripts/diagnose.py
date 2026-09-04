@@ -20,6 +20,8 @@ import json
 import statistics
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
+
+from quality import QUALITY_FLOOR  # 不降质量护栏门槛（quality.py 自包含，无循环依赖）
 from datetime import datetime
 from pathlib import Path
 
@@ -74,6 +76,12 @@ def _normalize_tasks(tasks):
         nt = dict(t)
         for k in _NUM_FIELDS:
             nt[k] = _as_int(nt.get(k))
+        # 质量分（不降质量护栏）：缺失 / None 保持 None（聚合时跳过，不污染均值）；
+        # 有值则归一化为 int（容忍字符串脏数据，与 _NUM_FIELDS 同一道读边界防护）。
+        if "quality_score" in t and t["quality_score"] is not None:
+            nt["quality_score"] = _as_int(t.get("quality_score"))
+        else:
+            nt["quality_score"] = None
         norm.append(nt)
     return norm
 
@@ -188,12 +196,16 @@ def compute_summary(tasks):
     for t in tasks:
         ty = t.get("type", "其他")
         d = by_type_map.setdefault(ty, {"task_type": ty, "baseline_tokens": 0, "skill_tokens": 0,
-                                       "baseline_minutes": 0, "skill_minutes": 0, "count": 0})
+                                       "baseline_minutes": 0, "skill_minutes": 0, "count": 0,
+                                       "quality_score_sum": 0, "quality_score_n": 0})
         d["baseline_tokens"] += t.get("baseline_tokens", 0) or 0
         d["skill_tokens"] += t.get("skill_tokens", 0) or 0
         d["baseline_minutes"] += t.get("baseline_minutes", 0) or 0
         d["skill_minutes"] += t.get("skill_minutes", 0) or 0
         d["count"] += 1
+        if t.get("quality_score") is not None:
+            d["quality_score_sum"] += t["quality_score"]
+            d["quality_score_n"] += 1
 
     by_type = []
     for ty, d in by_type_map.items():
@@ -201,8 +213,14 @@ def compute_summary(tasks):
         d["saved_minutes"] = d["baseline_minutes"] - d["skill_minutes"]
         d["token_save_pct"] = _safe_div(d["saved_tokens"], d["baseline_tokens"]) * 100
         d["time_save_pct"] = _safe_div(d["saved_minutes"], d["baseline_minutes"]) * 100
+        d["quality_score_avg"] = round(d["quality_score_sum"] / d["quality_score_n"]) if d["quality_score_n"] else None
         by_type.append(d)
     by_type.sort(key=lambda x: x["saved_tokens"], reverse=True)
+
+    # 不降质量护栏：整体质量分均值（仅聚含有质量分的任务；无则 avg_quality=0 / has_quality=False）
+    qvals = [t["quality_score"] for t in tasks if t.get("quality_score") is not None]
+    avg_quality = round(sum(qvals) / len(qvals)) if qvals else 0
+    has_quality = bool(qvals)
 
     # 按周聚合（取 date 的 ISO 周）
     by_week_map = {}
@@ -251,6 +269,8 @@ def compute_summary(tasks):
         "saved_min": saved_min,
         "token_save_pct": _safe_div(saved_tok, total_base_tok) * 100,
         "time_save_pct": _safe_div(saved_min, total_base_min) * 100,
+        "avg_quality": avg_quality,
+        "has_quality": has_quality,
         "by_type": by_type,
         "by_week": by_week,
         "span_days": span_days,
@@ -393,6 +413,11 @@ class Diagnosis:
     methodology: str = METHODOLOGY_NOTE
     tasks: list = field(default_factory=list)
     generated_at: str = ""
+    # 不降质量护栏（v0.9.12）：整体质量分均值与可信判定
+    avg_quality: int = 0
+    has_quality: bool = False
+    quality_floor: int = QUALITY_FLOOR
+    quality_ok: bool = True
 
     def __getitem__(self, key):
         # 缺失键抛 KeyError（而非 getattr 默认的 AttributeError），
@@ -438,4 +463,8 @@ def diagnose(tasks):
         caveats=caveats,
         tasks=s["tasks"],
         generated_at=s["generated_at"],
+        avg_quality=s["avg_quality"],
+        has_quality=s["has_quality"],
+        quality_floor=QUALITY_FLOOR,
+        quality_ok=(s["avg_quality"] >= QUALITY_FLOOR) if s["has_quality"] else True,
     )

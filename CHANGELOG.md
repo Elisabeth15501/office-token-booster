@@ -4,6 +4,36 @@
 
 ---
 
+## v0.9.11 — 「不降质量」护栏度量（北极星质量极落地）（2026-09-04）
+
+为北极星「在不降低交付质量的前提下，看清并降低 AI 使用成本/步骤」的质量极提供**可量化、零成本、可复现**的信号：每次 AI 交付后即刻评估其结构完整性，让「省了步骤/Token」的声明只有在质量保住时才可信。
+
+### 新增 `scripts/quality.py`（自包含、无项目内依赖、无 LLM）
+- 确定性结构清单，对渲染后的 markdown 做正则断言，**不调用 LLM**（避免重新产生 token 成本、需联网，直接违背北极星降本极）。
+- 四类交付物各有专属清单：
+  - **周报生成**：概览 / 重点工作非空 / 下周计划 / 风险与阻塞；
+  - **会议纪要**：核心结论 / 待办事项 / 行动项有负责人或截止 / 参会与背景；
+  - **数据分析**：关键指标表 + 无隐藏丢行（复用 S3 披露行）；
+  - **文档整理**：要点≥3 + 要点有实质内容（平均长度≥12 字）。
+- `QUALITY_FLOOR = 70`：低于此值，节省声明视为「不可信」（护栏触发）。
+- **关键章节硬性门槛**：新增 `critical` 检查集——任一关键项失败则该份交付物直接判为不可信，即便总分过门槛。各类型关键项为：`周报→风险与阻塞`、`纪要→核心结论`、`数据分析→无隐藏丢行`、`文档整理→要点≥3`。 rationale：缺失这些章节即等于「质量没保住」，护栏必须对最该拦住的失效模式生效。
+- `ScoreResult`：`score`(0–100, None=未测) / `checks` / `floor` / `critical` / `credible`(`score≥floor 且无关键项失败`) / `critical_failed` / `summary()`。
+
+### 全链路打通
+- `executor.execute()`：渲染后调用 `score_deliverable()`，把 `quality_score / quality_checks / quality_credible` 写入 `meta`；`execute_render` 返回三元组 `(ok, rendered, meta)`。
+- `conversation`：execute 即时回显「质量分：X/100（门槛 达标/偏低）｜ 检查…」；`pending` 跨轮携带 `quality_score`，confirm 时透传给 `run_long_chain` 写入账本。
+- `ledger_agent`：`propose_entry` / `run_long_chain` 新增 `quality_score` 入参（非 None 才落账）。
+- `diagnose`：归一化 `quality_score`；聚合整体与分类型 `avg_quality`，`has_quality`；`Diagnosis` 加 `avg_quality / has_quality / quality_floor / quality_ok`。
+- `report_engine`：护栏横幅三态——达标(绿)/节省不可信(红)/未测(灰)；类型表与任务表新增「质量分」列；Markdown 报告加「十二、质量护栏（不降质量）」节。
+
+### 回归测试
+- 新增 `tests/test_quality_guardrail.py`（15 项，allure 标记）：评分函数、executor meta、diagnose 聚合（avg=88/门槛击穿/无质量）、报告三态横幅、类型表列、会话往返。
+- 全量套件 **166 passed, 0 failed**；`security_preflight scripts` 通过（无 R1/R2/R3 红线）。
+
+- 版本号 `0.9.10 → 0.9.11`（config.yaml / SKILL.md）。
+
+---
+
 ## v0.9.10 — 对抗式审查 S 级清理（S1–S7）+ 质量门禁 P1 脏数据修复（2026-09-02）
 
 对抗式审查的 7 条 S 级（建议级）问题全部清零（纯工程清理、行为向下兼容），并补刀时间线五-B「质量门禁」flagged 的 **P1 字符串脏数据崩溃**：

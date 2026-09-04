@@ -46,15 +46,19 @@ def _lookup_type(diag, task_type):
 
 
 def propose_entry(diag, task_type, *, date=None, skill_tokens=None, skill_minutes=None,
-                  baseline_tokens=None, baseline_minutes=None, note=None):
+                  baseline_tokens=None, baseline_minutes=None, note=None,
+                  quality_score=None):
     """把刚完成的任务转成一条账本草稿。
 
     基线（baseline）= 你不用本技能、自己手搓 / 反复试错的成本，平台无从获得，故优先用
     该类型的历史均值预填；若用户显式传入则用传入值。技能实际消耗（skill_*）同理。
 
+    quality_score 为不降质量护栏的本次交付物质量分（0-100），由 executor 渲染时算出；
+    仅当非 None 时写入 entry（缺省表示「未测」，diagnose 聚合时跳过，不污染均值）。
+
     返回 (entry_dict, meta_dict)：
       entry_dict  —— 标准账本字段（date/type/baseline_tokens/skill_tokens/baseline_minutes/
-                     skill_minutes/note），可直接 append 进 ledger。
+                     skill_minutes/note/quality_score），可直接 append 进 ledger。
       meta_dict   —— {history_found, estimated_fields, warnings}，供 CLI 提示哪些是估算值。
     """
     hist = _lookup_type(diag, task_type)
@@ -106,6 +110,8 @@ def propose_entry(diag, task_type, *, date=None, skill_tokens=None, skill_minute
         "skill_minutes": int(skill_minutes),
         "note": note or "",
     }
+    if quality_score is not None:
+        entry["quality_score"] = int(quality_score)
     return entry, meta
 
 
@@ -275,8 +281,11 @@ def import_host_usage(ledger_path, days=7, provider=None, *,
 
 def run_long_chain(ledger_path, task_type, *, apply=False, date=None,
                    skill_tokens=None, skill_minutes=None,
-                   baseline_tokens=None, baseline_minutes=None, note=None):
+                   baseline_tokens=None, baseline_minutes=None, note=None,
+                   quality_score=None):
     """长链路 Agent 主流程：读取 → 诊断 → 建议 → 写回 → 重新诊断。
+
+    quality_score（不降质量护栏）透传给 propose_entry，写回账本后参与 diagnose 聚合。
 
     返回 dict：{old_diag, entry, meta, new_diag, ledger_path, applied, backup_path}。
     对话层（qa）/ 渲染层（report_engine）完全不参与，保证内核单一事实源。
@@ -286,7 +295,7 @@ def run_long_chain(ledger_path, task_type, *, apply=False, date=None,
     entry, meta = propose_entry(old_diag, task_type, date=date,
                                 skill_tokens=skill_tokens, skill_minutes=skill_minutes,
                                 baseline_tokens=baseline_tokens, baseline_minutes=baseline_minutes,
-                                note=note)
+                                note=note, quality_score=quality_score)
     # P0 护栏（质量门禁）：baseline 缺省（非用户显式 0）且会产生负节省时，
     # 拒绝写回——避免「baseline=0/skill=3000」污染账本、拉偏历史均值。
     _baseline_estimated = "baseline_tokens" in meta.get("estimated_fields", [])

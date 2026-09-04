@@ -299,11 +299,13 @@ def generate_markdown_report(s, *, use_online_search=False):
     # 三、任务类型统计
     L.append("## 三、任务类型统计")
     L.append("")
-    L.append("| 类型 | 任务数 | 基准 Token | 本技能 Token | 省 Token | 省时间(分) | Token节省% |")
-    L.append("|------|------|------|------|------|------|------|")
+    L.append("| 类型 | 任务数 | 基准 Token | 本技能 Token | 省 Token | 省时间(分) | Token节省% | 质量分 |")
+    L.append("|------|------|------|------|------|------|------|------|")
     for d in s.by_type:
+        q = d.get("quality_score_avg")
+        q_disp = "—" if q is None else q
         L.append(f"| {d['task_type']} | {d['count']} | {format_number(d['baseline_tokens'])} | {format_number(d['skill_tokens'])} | "
-                 f"{format_number(d['saved_tokens'])} | {format_number(d['saved_minutes'])} | {d['token_save_pct']:.1f}% |")
+                 f"{format_number(d['saved_tokens'])} | {format_number(d['saved_minutes'])} | {d['token_save_pct']:.1f}% | {q_disp} |")
     L.append("")
 
     # 四、任务 Token 消耗统计
@@ -390,9 +392,15 @@ def generate_markdown_report(s, *, use_online_search=False):
     L.append("- 若参加「天禧 AI Skills 苍穹共创计划」，本报告的「本地处理、零上传」可作为合规卖点。")
     L.append("")
 
+    # 质量护栏（不降质量，v0.9.12 新增）
+    L.append("## 十二、质量护栏（不降质量）")
+    L.append("")
+    L.append(_quality_guard_md(s))
+    L.append("")
+
     # 数据可信度提示（baseline 护栏，v0.2 新增）
     if s.caveats:
-        L.append("## 十二、数据可信度提示")
+        L.append("## 十三、数据可信度提示")
         L.append("")
         L.append("> 节省值基于你填写的基准估计，以下提示用于校验「提效」声称的可信度：")
         L.append("")
@@ -416,6 +424,40 @@ def _bar_html(value, max_value, color="#2ecc71"):
             f'<div style="background:{color};height:14px;border-radius:4px;width:{w}%;"></div></div>')
 
 
+def _quality_guard_html(s):
+    """不降质量护栏横幅（HTML）：根据整体质量分均值给「节省是否可信」判定。"""
+    if not s.has_quality:
+        color, icon, msg = "#6b7280", "ℹ️", "本期无质量分记录，节省值仅反映成本对比（交付质量未测）。"
+    elif s.quality_ok:
+        color, icon, msg = "#16a34a", "✅", f"质量达标（均分 {s.avg_quality}/100 ≥ 门槛 {s.quality_floor}），节省可信。"
+    else:
+        color, icon, msg = "#dc2626", "⚠️", (f"质量跌破基线（均分 {s.avg_quality}/100 < 门槛 {s.quality_floor}），"
+                                       f"本期节省不可信，请先复核交付物结构完整度。")
+    return (f'<div style="border-left:4px solid {color};background:#f9fafb;padding:10px 12px;'
+            f'border-radius:8px;margin:14px 0;color:#111827;">'
+            f'<strong style="color:{color}">{icon} 质量护栏</strong>　{msg}</div>')
+
+
+def _quality_guard_md(s):
+    """不降质量护栏文案（Markdown）。"""
+    if not s.has_quality:
+        return ("> ⚠️ **质量护栏**：本期无质量分记录，节省值仅反映成本对比"
+                "（交付质量未测）。建议在生成交付物后用本技能自带的确定性质量检查。")
+    if s.quality_ok:
+        return (f"> ✅ **质量护栏**：均分 {s.avg_quality}/100 ≥ 门槛 {s.quality_floor}，"
+                f"交付质量达标，节省可信。")
+    return (f"> ⚠️ **质量护栏**：均分 {s.avg_quality}/100 < 门槛 {s.quality_floor}，"
+            f"**本期节省不可信**——请先复核交付物结构完整度，勿仅凭成本下降下结论。")
+
+
+def _quality_cell(q, floor):
+    """表格内质量分单元格（HTML）。q=None → 灰色「—」。"""
+    if q is None:
+        return '<td style="color:var(--muted)">—</td>'
+    color = "#16a34a" if q >= floor else "#dc2626"
+    return f'<td style="color:{color};font-weight:600">{q}</td>'
+
+
 def generate_html_report(s, *, use_online_search=False):
     donut = build_donut_chart(s.by_type, title="各任务类型 节省 Token 占比",
                               center_label="节省 Token", value_key="saved_tokens")
@@ -424,11 +466,15 @@ def generate_html_report(s, *, use_online_search=False):
     type_rows = ""
     max_tok = max((d["baseline_tokens"] for d in s.by_type), default=1) or 1
     for d in s.by_type:
+        q = d.get("quality_score_avg")
+        q_disp = "—" if q is None else str(q)
+        q_color = "var(--muted)" if q is None else ("#16a34a" if q >= s.quality_floor else "#dc2626")
         type_rows += (
             f'<tr><td>{_esc(d["task_type"])}</td><td>{d["count"]}</td>'
             f'<td>{format_number(d["baseline_tokens"])}</td><td>{format_number(d["skill_tokens"])}</td>'
             f'<td>{format_number(d["saved_tokens"])}</td><td>{format_number(d["saved_minutes"])}</td>'
-            f'<td>{d["token_save_pct"]:.1f}%</td></tr>'
+            f'<td>{d["token_save_pct"]:.1f}%</td>'
+            f'<td style="color:{q_color};font-weight:600">{q_disp}</td></tr>'
         )
 
     week_rows = ""
@@ -455,10 +501,13 @@ def generate_html_report(s, *, use_online_search=False):
         st = t.get("skill_tokens", 0) or 0
         bm = t.get("baseline_minutes", 0) or 0
         sm = t.get("skill_minutes", 0) or 0
+        q = t.get("quality_score")
+        q_disp = "—" if q is None else str(q)
         task_rows += (f'<tr><td>{_esc(t.get("date",""))}</td><td>{_esc(t.get("type",""))}</td>'
                       f'<td>{bm}</td><td>{sm}</td><td>{bm-sm}</td>'
                       f'<td>{format_number(bt)}</td><td>{format_number(st)}</td>'
-                      f'<td>{format_number(bt-st)}</td></tr>')
+                      f'<td>{format_number(bt-st)}</td>'
+                      f'<td style="color:var(--muted)">{q_disp}</td></tr>')
 
     css = """
     :root{--bg:#fff;--fg:#111827;--muted:#6b7280;--table-border:#e5e7eb;
@@ -499,6 +548,8 @@ def generate_html_report(s, *, use_online_search=False):
             f'<ul>{caveat_html}</ul>'
         )
 
+    quality_block = _quality_guard_html(s)
+
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -511,9 +562,9 @@ def generate_html_report(s, *, use_online_search=False):
   <div class="card"><div class="big">{format_number(s.saved_min)} 分</div><div class="sub">节省时间（基准 {format_number(s.total_base_min)} → 本技能 {format_number(s.total_skill_min)}，省 {s.time_save_pct:.1f}%）</div></div>
   <div class="card" style="display:flex;align-items:center;justify-content:center;">{donut}</div>
 </div>
-
+{quality_block}
 <h2>一、任务类型统计</h2>
-<table><thead><tr><th>类型</th><th>任务数</th><th>基准 Token</th><th>本技能 Token</th><th>省 Token</th><th>省时间(分)</th><th>Token节省%</th></tr></thead>
+<table><thead><tr><th>类型</th><th>任务数</th><th>基准 Token</th><th>本技能 Token</th><th>省 Token</th><th>省时间(分)</th><th>Token节省%</th><th>质量分</th></tr></thead>
 <tbody>{type_rows}</tbody></table>
 
 <h2>二、按周趋势</h2>
@@ -524,7 +575,7 @@ def generate_html_report(s, *, use_online_search=False):
 {roi_card}
 
 <h2>三、任务执行情况</h2>
-<table><thead><tr><th>日期</th><th>类型</th><th>基准(min)</th><th>技能(min)</th><th>省(min)</th><th>基准(tok)</th><th>技能(tok)</th><th>省(tok)</th></tr></thead>
+<table><thead><tr><th>日期</th><th>类型</th><th>基准(min)</th><th>技能(min)</th><th>省(min)</th><th>基准(tok)</th><th>技能(tok)</th><th>省(tok)</th><th>质量分</th></tr></thead>
 <tbody>{task_rows}</tbody></table>
 
 <h2>四、核心洞察与建议</h2>
@@ -590,6 +641,8 @@ def generate_markdown_summary(s):
     L.append(f"- {s.insights[0] if s.insights else '暂无数据。'}")
     L.append("")
     L.append(_credibility_block_md(s))
+    L.append("")
+    L.append(_quality_guard_md(s))
 
     # Skill 推荐（v0.9.1 新增）
     skill_recs = recommend_skills(s.by_type, s.n)
@@ -629,6 +682,8 @@ def generate_html_summary(s):
                      '<ul>' + "".join(f"<li>⚠️ {_esc(c)}</li>" for c in s.caveats) + "</ul>")
     else:
         cred_html = '<p style="color:var(--muted)">基线为你的估计参照，非计费实测；当前未发现明显异常。</p>'
+
+    cred_html += _quality_guard_html(s)
 
     css = """
     :root{--bg:#fff;--fg:#111827;--muted:#6b7280;--table-border:#e5e7eb;

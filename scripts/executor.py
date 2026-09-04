@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 
+from quality import score_deliverable  # noqa: E402  # 不降质量护栏：渲染后确定性打分
+
 # ---------------------------------------------------------------------------
 # 任务类型归一（复用类型字典；缺失则退化为直匹配）
 # ---------------------------------------------------------------------------
@@ -377,27 +379,38 @@ _DISPATCH = {
 EXECUTORS = _DISPATCH
 
 
-def execute_render(task_type: str, text: str) -> Tuple[bool, str]:
-    """按标准类型名渲染交付物。返回 (是否成功, 内容或错误说明)。
+def execute_render(task_type: str, text: str) -> Tuple[bool, str, dict]:
+    """按标准类型名渲染交付物。返回 (是否成功, 内容或错误说明, meta)。
 
-    委托 execute()（单一渲染入口），把其 ValueError 转成 (False, 说明)，
-    避免两套分发逻辑漂移。供 conversation 的 execute 意图路由调用；
+    meta 含 task_type / chars / quality_score / quality_checks / quality_credible
+    （不降质量护栏）。委托 execute()（单一渲染入口），把其 ValueError 转成
+    (False, 说明, {})，避免两套分发逻辑漂移。供 conversation 的 execute 意图路由调用；
     不写盘、不联网、不读密钥，纯本地渲染，符合执行层零依赖红线。
     """
     try:
-        md, _ = execute(task_type, text)
+        md, meta = execute(task_type, text)
     except ValueError as e:
-        return False, str(e)
-    return True, md
+        return False, str(e), {}
+    return True, md, meta
 
 
 def execute(task_type: str, text: str) -> tuple[str, dict]:
-    """执行一个任务，返回 (markdown, meta)。task_type 为标准名。"""
+    """执行一个任务，返回 (markdown, meta)。task_type 为标准名。
+
+    meta 额外携带不降质量护栏信号：quality_score(0-100) / quality_checks(逐项明细) /
+    quality_credible(是否达 QUALITY_FLOOR)，由 quality.score_deliverable 对渲染结果
+    做确定性结构断言得到，离线、无 LLM、零额外 token 成本。
+    """
     fn = _DISPATCH.get(task_type)
     if fn is None:
         raise ValueError(f"执行引擎不支持的任务类型：{task_type}")
     md = fn(text)
     meta = {"task_type": task_type, "chars": len(md)}
+    qr = score_deliverable(task_type, md)
+    if qr.score is not None:
+        meta["quality_score"] = qr.score
+        meta["quality_checks"] = [list(c) for c in qr.checks]
+        meta["quality_credible"] = qr.credible
     return md, meta
 
 
@@ -411,6 +424,7 @@ def propose_ledger(ledger_path: str, task_type: str,
                    baseline_tokens: Optional[int] = None,
                    baseline_minutes: Optional[int] = None,
                    note: Optional[str] = None,
+                   quality_score: Optional[int] = None,
                    apply: bool = False) -> Optional[dict]:
     """执行完后把这笔账记回 ledger。
 
@@ -419,6 +433,8 @@ def propose_ledger(ledger_path: str, task_type: str,
     skill_minutes 优先于 cost 字典。
     baseline_tokens / baseline_minutes 为用户「笨办法」手搓基准，显式传入可绕过
     P0 护栏直接写回（空账本上不传 baseline 会被护栏拦截，避免负节省污染账本）。
+    quality_score 为不降质量护栏的本次交付物质量分（0-100），由 execute() 渲染时算出，
+    跨轮经 conversation.state["pending"] 带入门，写回账本后参与 diagnose 聚合。
     """
     if cost:
         if skill_tokens is None:
@@ -433,7 +449,7 @@ def propose_ledger(ledger_path: str, task_type: str,
         ledger_path, task_type, apply=apply,
         skill_tokens=skill_tokens, skill_minutes=skill_minutes,
         baseline_tokens=baseline_tokens, baseline_minutes=baseline_minutes,
-        note=note,
+        note=note, quality_score=quality_score,
     )
 
 

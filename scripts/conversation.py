@@ -338,6 +338,7 @@ def handle(ledger_path, text, state, intent=None):
             baseline_tokens=pending.get("baseline_tokens"),
             baseline_minutes=pending.get("baseline_minutes"),
             note=pending.get("note"),
+            quality_score=pending.get("quality_score"),
         )
         state["pending"] = None
         if res.get("blocked"):
@@ -420,7 +421,7 @@ def _do_execute(ledger_path, text, state, diag):
         return ("没认出要执行的任务类型。支持：周报生成 / 会议纪要 / 数据分析 / "
                 "文档整理 / PPT大纲。例如：「帮我写周报：这周完成了 A、B、C」")
     content = _extract_exec_input(text)
-    ok, rendered = _exec_render(etype, content)
+    ok, rendered, meta = _exec_render(etype, content)
     if not ok:
         return rendered
 
@@ -428,6 +429,7 @@ def _do_execute(ledger_path, text, state, diag):
     # skill 维度留 None，确认写回时由护栏要求补 baseline（P0 不破）。
     # 注意：此处无需调用 propose_entry —— 只取日期与空备注即可，避免为「历史均值估算」
     # 做无谓计算（其 meta 警告本就被丢弃）—— S2 修复：消除 _do_execute 的 propose_entry 浪费。
+    # 质量分来自 execute 渲染后的确定性结构断言（不降质量护栏），跨轮经 pending 带入门。
     state["pending"] = {
         "type": etype,
         "date": datetime.now().strftime("%Y-%m-%d"),
@@ -436,12 +438,21 @@ def _do_execute(ledger_path, text, state, diag):
         "baseline_tokens": None,
         "baseline_minutes": None,
         "note": "",
+        "quality_score": meta.get("quality_score"),
     }
     lines = [
         rendered,
         "",
         "---",
-        f"已生成交付物（{etype}）。是否记入账本？",
+        f"已生成交付物（{etype}）。",
+    ]
+    # 不降质量护栏：当场给质量分，让用户在记账前就「看清」交付物结构完整度
+    if meta.get("quality_score") is not None:
+        checks = meta.get("quality_checks") or []
+        mark_s = " ".join(f"{n}{'✓' if ok else '✗'}" for n, ok in checks)
+        lines.append(f"质量分：{meta['quality_score']}/100（门槛 {meta.get('quality_credible') and '达标' or '偏低'}）｜ 检查：{mark_s}")
+    lines += [
+        "是否记入账本？",
         "回复「确认」即建议记账；写回账本需补 baseline 基准成本（笨办法手搓要多少），",
         "例如：「确认 baseline 12000 token 25分钟」。",
     ]
