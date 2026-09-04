@@ -19,6 +19,7 @@ import html
 import importlib
 import io
 import json
+import logging
 import re
 import sys
 from dataclasses import dataclass
@@ -27,13 +28,16 @@ from typing import Optional, Tuple
 
 from quality import score_deliverable  # noqa: E402  # 不降质量护栏：渲染后确定性打分
 
+_logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # 任务类型归一（复用类型字典；缺失则退化为直匹配）
 # ---------------------------------------------------------------------------
 try:
     from type_registry import load_registry, normalize_type  # type: ignore
     _REGISTRY = load_registry()
-except Exception:  # pragma: no cover - 字典缺失时退化
+except (ImportError, ModuleNotFoundError, FileNotFoundError) as e:  # pragma: no cover - 字典缺失时退化
+    _logger.warning("type_registry 加载失败，任务类型归一将退化为直匹配: %s", e)
     _REGISTRY = None
 
     def normalize_type(t: str, registry=None) -> str:  # type: ignore
@@ -74,8 +78,8 @@ def resolve_exec_type(task_type: str) -> Optional[str]:
             norm = normalize_type(task_type, _REGISTRY)
             if norm in _EXEC_ALIASES.values():
                 return norm
-        except Exception:
-            pass
+        except (TypeError, ValueError, KeyError, AttributeError) as e:
+            _logger.debug("type_registry 归一化 '%s' 失败，继续走别名兜底: %s", task_type, e)
     key = task_type.strip().lower()
     if key in _EXEC_ALIASES:
         return _EXEC_ALIASES[key]
@@ -443,7 +447,8 @@ def propose_ledger(ledger_path: str, task_type: str,
             skill_minutes = cost.get("skill_minutes")
     try:
         from ledger_agent import run_long_chain
-    except Exception:
+    except ImportError as e:
+        _logger.warning("ledger_agent 无法导入，跳过自动记账: %s", e)
         return None
     return run_long_chain(
         ledger_path, task_type, apply=apply,
@@ -497,7 +502,8 @@ def _try_import(module_name: str):
     """延迟导入可选第三方库；缺失返回 None（调用方据此降级）。"""
     try:
         return importlib.import_module(module_name)
-    except Exception:  # pragma: no cover - 依赖缺失时走降级分支
+    except ImportError as e:  # pragma: no cover - 依赖缺失时走降级分支
+        _logger.debug("可选依赖 %s 未安装，已降级: %s", module_name, e)
         return None
 
 
@@ -609,7 +615,8 @@ def export_docx(md: str, out_path: str, title: str) -> Tuple[str, str]:
             # 避免 export_docx 因 KeyError/ValueError 崩溃（与表格样式降级一致）。
             try:
                 doc.add_paragraph(_strip_bold(payload), style="Intense Quote")
-            except Exception:  # pragma: no cover - 样式名随 Word 模板变化
+            except (KeyError, ValueError) as e:  # pragma: no cover - 样式名随 Word 模板变化
+                _logger.debug("Word 样式 'Intense Quote' 不可用，已降级为默认段落: %s", e)
                 doc.add_paragraph(_strip_bold(payload))
         elif kind == "ul":
             for it in payload:
@@ -618,8 +625,8 @@ def export_docx(md: str, out_path: str, title: str) -> Tuple[str, str]:
             t = doc.add_table(rows=1, cols=len(payload[0]))
             try:
                 t.style = "Light Grid Accent 1"
-            except Exception:  # pragma: no cover - 样式名随 Word 版本变化
-                pass
+            except (KeyError, ValueError) as e:  # pragma: no cover - 样式名随 Word 版本变化
+                _logger.debug("Word 表格样式 'Light Grid Accent 1' 不可用，已跳过: %s", e)
             hdr = t.rows[0].cells
             for j, c in enumerate(payload[0]):
                 hdr[j].text = _strip_bold(c)
@@ -758,7 +765,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.cost_json:
             try:
                 cost = json.loads(args.cost_json)
-            except Exception as e:
+            except json.JSONDecodeError as e:
                 print(f"[错误] --cost-json 解析失败：{e}", file=sys.stderr)
                 return 2
         try:

@@ -136,7 +136,7 @@ metadata:
 **1) 初始化账本（仅首次）**
 
 ```bash
-python scripts/executor.py --init-ledger ledger.json
+python scripts/executor.py --init-ledger examples/ledger.json
 ```
 
 **2) 执行任务并自动记账（方向 B 核心）**
@@ -149,11 +149,11 @@ python scripts/executor.py --type 周报生成 --input 本周事件.txt --output
 
 # 预览记账（dry-run，安全）
 python scripts/executor.py --type 周报生成 --input 本周事件.txt \
-  --apply-ledger ledger.json --skill-tokens 1800 --baseline-tokens 12000 --baseline-minutes 25
+  --apply-ledger examples/ledger.json --skill-tokens 1800 --baseline-tokens 12000 --baseline-minutes 25
 
 # 确认写回（加 --confirm-ledger）
 python scripts/executor.py --type 周报生成 --input 本周事件.txt \
-  --apply-ledger ledger.json --skill-tokens 1800 --baseline-tokens 12000 --baseline-minutes 25 --confirm-ledger
+  --apply-ledger examples/ledger.json --skill-tokens 1800 --baseline-tokens 12000 --baseline-minutes 25 --confirm-ledger
 ```
 
 > `baseline_*` = 你不用本技能、自己手搓 / 反复试错的估计成本；`skill_*` = 这次用 AI 实际花的。节省 = baseline − skill。**必须提供 baseline 才能写回**（护栏防污染账本）；不加 `--confirm-ledger` 永远是预览。
@@ -161,7 +161,7 @@ python scripts/executor.py --type 周报生成 --input 本周事件.txt \
 **3) 生成提效报告**
 
 ```bash
-python scripts/report_engine.py ledger.json --format html --output 提效报告.html
+python scripts/report_engine.py examples/ledger.json --format html --output 提效报告.html
 # 一句话摘要：加 --summary；Markdown：--format markdown
 ```
 
@@ -170,7 +170,7 @@ python scripts/report_engine.py ledger.json --format html --output 提效报告.
 ```python
 from scripts.diagnose import load_ledger, diagnose
 from scripts.qa import answer_followup
-d = diagnose(load_ledger("ledger.json"))
+d = diagnose(load_ledger("examples/ledger.json"))
 print(answer_followup(d, "哪个任务类型最省 Token？"))
 print(answer_followup(d, "这周比上周怎么样？"))
 ```
@@ -181,7 +181,7 @@ print(answer_followup(d, "这周比上周怎么样？"))
 # 若宿主平台在任务完成时回传用量事件，则读取实测值；无回传则跳过，不影响其它功能
 python scripts/host_cost.py --days 7
 # 把真实用量导成账本草稿（dry-run 预览，不写盘；加 --apply 才写回）
-python scripts/ledger_agent.py ledger.json --import-host --days 7
+python scripts/ledger_agent.py examples/ledger.json --import-host --days 7
 ```
 
 **全量测试：**
@@ -192,7 +192,7 @@ pytest tests/ -q --alluredir=allure-results
 
 ## 提效账本数据格式
 
-把任务记录保存为 JSON（如 `ledger.json`），每一条：
+把任务记录保存为 JSON（如 `examples/ledger.json`），每一条：
 
 ```json
 {
@@ -229,14 +229,14 @@ pytest tests/ -q --alluredir=allure-results
 
 ## 长链路自动记账（v0.3 长链路 Agent）
 
-对话式诊断是「只读、响应式」外壳；v0.3 在此基础上叠加**主动管道**：任务完成后，让 Agent 自动把这笔账记回 `ledger.json`，减少你手填负担。它直接消费共享内核 `diagnose()`，对话层（`qa.py`）与报告层（`report_engine.py`）**一行都不用改**。
+对话式诊断是「只读、响应式」外壳；v0.3 在此基础上叠加**主动管道**：任务完成后，让 Agent 自动把这笔账记回 `examples/ledger.json`，减少你手填负担。它直接消费共享内核 `diagnose()`，对话层（`qa.py`）与报告层（`report_engine.py`）**一行都不用改**。
 
 由 `scripts/ledger_agent.py` 提供，三个动作可组合：
 
-1. **建议生成（propose_entry）**：`python ledger_agent.py <ledger.json> --type 周报生成 --skill-tokens 1800`
+1. **建议生成（propose_entry）**：`python ledger_agent.py <examples/ledger.json> --type 周报生成 --skill-tokens 1800`
    - 用该类型的历史均值预填 `baseline`（你手搓成本）估计；你也可显式传 `--baseline-tokens` / `--baseline-minutes` / `--skill-minutes` / `--note` 覆盖。
    - 未提供或新类型时，会标记「估算字段」并提醒你补填真实手搓成本。
-2. **待自动化建议（--targets）**：`python ledger_agent.py <ledger.json> --targets`
+2. **待自动化建议（--targets）**：`python ledger_agent.py <examples/ledger.json> --targets`
    - 按历史基线从高到低，列出最该做成可复用模板的任务类型。
 3. **写回账本（append_entry）**：默认 **dry-run 仅预览**，加上 `--apply` 才真正写回（写前自动备份为 `<ledger>.bak`，原子替换）。
    - 预览会显示写回前后「任务数 / 节省 Token / 节省分钟」的变化，方便你确认。
@@ -256,7 +256,7 @@ v0.3 给了「主动记账」的原子能力；v0.4 把它们与对话式诊断�
 - **被动记账建议**：说「我刚生成了周报，花了1800 token」也能识别为记账意图（完成动词 + 成本数字），并模糊匹配到账本已有类型名，降低手填负担。
 - **连续对话**：记账前后都能直接追问（qa 接地）、看摘要（report_engine）、看自动化建议（ledger_agent），所有数字来自同一份 `Diagnosis`，三处始终一致；确认写回后还会主动弹一条「最该自动化」的建议。
 
-交互示例：`python conversation.py <ledger.json>` 进入 REPL；也可在 Python 里 `handle(ledger, text, state)` 单轮调用，便于 Skill / 对话 UI 集成（state 保存待确认条目）。
+交互示例：`python conversation.py <examples/ledger.json>` 进入 REPL；也可在 Python 里 `handle(ledger, text, state)` 单轮调用，便于 Skill / 对话 UI 集成（state 保存待确认条目）。
 
 > 这就是 v0.1 三层解耦的复利：v0.4 没有碰任何既有三层，只是新增一个消费它们的编排层，却让「说一句就记一笔、记完接着问」成为单一体验。
 
@@ -291,7 +291,7 @@ v0.5 以前，记账要等**用户主动说**「记一笔」或「我刚生成�
 from skill_bridge import on_conversation_event
 state = {}
 # 宿主在完成一次办公任务后，把真实用量随事件一并传来（v0.7 起支持 event["cost"]）
-res = on_conversation_event("ledger.json", {
+res = on_conversation_event("examples/ledger.json", {
     "role": "user", "text": "我刚生成了周报",
     "cost": {"skill_tokens": 1800, "skill_minutes": 5},
 }, state)
@@ -350,7 +350,7 @@ python scripts/executor.py --type 数据分析 --input data.csv --output 分析 
 
 # 执行完自动记账：把这笔任务的实测成本记回账本（缺 baseline 会被护栏拦截，提示补填）
 python scripts/executor.py --type 周报生成 --input 本周要点.txt \
-    --apply-ledger ledger.json --skill-tokens 1800 --skill-minutes 5
+    --apply-ledger examples/ledger.json --skill-tokens 1800 --skill-minutes 5
 #   加 --confirm-ledger 才真正写回；否则仅 dry-run 预览
 ```
 

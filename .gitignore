@@ -3,7 +3,7 @@ __pycache__/
 *.pyc
 reports/
 *.html
-ledger.json
+/ledger.json
 data*.json
 _meta.json
 *.zip

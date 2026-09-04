@@ -36,9 +36,9 @@ def _safe_url(u):
 class SkillRecommendation:
     """一条 Skill 推荐记录。"""
 
-    skill: str                          # Skill 名称（用于展示和安装命令）
+    skill: str                          # Skill 名称
     reason: str                         # 推荐理由（自然语言）
-    install_cmd: str                    # 安装命令（可直接复制执行）
+    install_cmd: str                    # 安装指引（本平台不开放自动安装，仅提供来源链接）
     expected_saving: str                # 预期节省（来自 benchmark，标注来源）
     priority: str = "MEDIUM"           # CRITICAL / HIGH / MEDIUM
     evidence_url: Optional[str] = None  # 数据来源链接（可选）
@@ -46,7 +46,7 @@ class SkillRecommendation:
     skillhub_slug: Optional[str] = None  # SkillHub slug（用于联网查询）
     skillhub_info: Optional[dict] = None  # SkillHub 详情（搜索后填充）
     clawhub_info: Optional[dict] = None   # ClawHub 详情（搜索后填充）
-    requires_confirmation: bool = True  # 是否需用户确认才安装
+    requires_confirmation: bool = True  # 是否需用户确认才安装（当前仅作展示，不执行任何命令）
 
 
 # ─────────────────────────────────────────────────────────────
@@ -60,7 +60,7 @@ _TASK_TYPE_RULES = [
         "skill": SkillRecommendation(
             skill="ponytail",
             reason="你的'{task_type}'任务消耗较高，Ponytail 通过 YAGNI 决策阶梯强制最少代码，实测减 22% Token / 20% 成本",
-            install_cmd="clawhub install ponytail",
+            install_cmd="请访问数据来源页面按官方说明手动安装",
             expected_saving="-22% Token (Ponytail agentic benchmark, 12 tasks, Haiku 4.5)",
             priority="HIGH",
             evidence_url="https://github.com/DietrichGebert/ponytail",
@@ -72,7 +72,7 @@ _TASK_TYPE_RULES = [
         "skill": SkillRecommendation(
             skill="caveman",
             reason="你的'{task_type}'任务消耗较高，Caveman 让 AI 用精简语言回复，输出侧平均减 65% Token",
-            install_cmd="npx skills add JuliusBrussee/caveman",
+            install_cmd="请访问数据来源页面按官方说明手动安装",
             expected_saving="-65% output tokens (Caveman README, 10-task benchmark)",
             priority="HIGH",
             evidence_url="https://github.com/JuliusBrussee/caveman",
@@ -83,7 +83,7 @@ _TASK_TYPE_RULES = [
         "keywords": ["终端", "日志", "编译", "测试", "git", "命令行", "CLI", "构建"],
         "skill": "rtk",
         "reason_template": "你的'{task_type}'任务涉及终端输出，RTK 过滤 CLI 噪声，实测平均减 89% 无效 Token",
-        "install_cmd": "curl -fsSL https://rtk-ai.app/install.sh | sh",
+        "install_cmd": "请访问数据来源页面按官方说明手动安装",
         "expected_saving": "-89% CLI noise (RTK benchmark, 2,900+ commands)",
         "priority": "MEDIUM",
         "evidence_url": "https://github.com/rtk-ai/rtk",
@@ -94,7 +94,7 @@ _TASK_TYPE_RULES = [
         "skill": SkillRecommendation(
             skill="token-diet",
             reason="你的'{task_type}'任务消耗较高，token-diet 六维治理综合优化，平均减 31% 账单",
-            install_cmd="curl -fsSL https://raw.githubusercontent.com/Kulaxyz/token-diet/main/install.sh | bash",
+            install_cmd="请访问数据来源页面按官方说明手动安装",
             expected_saving="-31% bill on average (token-diet Sonnet 5 benchmark)",
             priority="MEDIUM",
             evidence_url="https://github.com/Kulaxyz/token-diet",
@@ -111,7 +111,7 @@ _GLOBAL_RULES = [
         "skill": SkillRecommendation(
             skill="token-diet",
             reason="本周总消耗较高，token-diet 六维治理综合优化，平均减 31% 账单",
-            install_cmd="curl -fsSL https://raw.githubusercontent.com/Kulaxyz/token-diet/main/install.sh | bash",
+            install_cmd="请访问数据来源页面按官方说明手动安装",
             expected_saving="-31% bill on average (token-diet Sonnet 5 benchmark)",
             priority="CRITICAL",
             evidence_url="https://github.com/Kulaxyz/token-diet",
@@ -123,7 +123,7 @@ _GLOBAL_RULES = [
         "skill": SkillRecommendation(
             skill="caveman",
             reason="本周任务频繁，Caveman 让 AI 精简回复，累计节省可观",
-            install_cmd="npx skills add JuliusBrussee/caveman",
+            install_cmd="请访问数据来源页面按官方说明手动安装",
             expected_saving="-65% output tokens (Caveman README)",
             priority="MEDIUM",
             evidence_url="https://github.com/JuliusBrussee/caveman",

@@ -485,11 +485,13 @@ def main():
     print("=== 办公室提效对话（执行 + 自动记账）===")
     print('试试：我刚生成了周报，花了1800 token 5分钟 ｜ 哪个类型省最多？ '
           '｜ 生成摘要 ｜ 待自动化建议 ｜ 退出')
-    while True:
+    running = True
+    while running:
         try:
             line = input("你> ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\n再见，账本已保留。")
+            running = False
             break
         if not line:
             continue
@@ -497,6 +499,7 @@ def main():
         resp = handle(ledger, line, state, intent)
         if intent == "exit":
             print("助手> " + resp)
+            running = False
             break
         print("助手> " + resp + "\n")
 
