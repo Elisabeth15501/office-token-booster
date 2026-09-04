@@ -392,7 +392,7 @@ def generate_markdown_report(s, *, use_online_search=False):
     L.append("- 若参加「天禧 AI Skills 苍穹共创计划」，本报告的「本地处理、零上传」可作为合规卖点。")
     L.append("")
 
-    # 质量护栏（不降质量，v0.9.12 新增）
+    # 质量护栏（不降质量，v0.9.11 新增）
     L.append("## 十二、质量护栏（不降质量）")
     L.append("")
     L.append(_quality_guard_md(s))

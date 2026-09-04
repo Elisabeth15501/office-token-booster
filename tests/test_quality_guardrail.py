@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""不降质量护栏度量（v0.9.12）回归测试。
+"""不降质量护栏度量（v0.9.11）回归测试。
 
 覆盖：quality.py 各类型结构清单打分、executor 渲染后带质量分、diagnose 聚合
 avg_quality / by_type.quality_score_avg、report_engine 护栏横幅（达标 / 跌破基线 /

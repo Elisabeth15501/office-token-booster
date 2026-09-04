@@ -413,7 +413,7 @@ class Diagnosis:
     methodology: str = METHODOLOGY_NOTE
     tasks: list = field(default_factory=list)
     generated_at: str = ""
-    # 不降质量护栏（v0.9.12）：整体质量分均值与可信判定
+    # 不降质量护栏（v0.9.11）：整体质量分均值与可信判定
     avg_quality: int = 0
     has_quality: bool = False
     quality_floor: int = QUALITY_FLOOR
