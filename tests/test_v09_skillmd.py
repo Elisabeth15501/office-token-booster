@@ -67,16 +67,20 @@ _OVERPROMISE_FORBIDDEN = [
 @allure.label("priority", "P1")
 @allure.label("suite", "v0.9.5-direction-b")
 @src_link("SKILL.md", line=1, name="SKILL.md 源码")
-@allure.title("v1.0 SKILL.md：name 不变 + version 0.9.x + 描述诚实声明『执行与度量一体』")
+@allure.title("v1.0 SKILL.md：name 不变 + version >= 0.9.0 + 描述诚实声明『执行与度量一体』")
 @allure.severity(allure.severity_level.CRITICAL)
-@allure.description("验证 name 仍为 office-token-booster、版本 >= 0.9.0、描述体现方向 B 执行+度量一体定位。")
+@allure.description("验证 name 仍为 office-token-booster、版本 >= 0.9.0（对 1.0.0 及更高版本均成立）、描述体现方向 B 执行+度量一体定位。")
 @pytest.mark.smoke
 def test_v09_skillmd_metadata():
     text, fm = _load()
     with allure.step("断言 name / version / description"):
         attach_text(fm, "frontmatter")
         assert 'name: office-token-booster' in fm, "name 必须保持不变"
-        assert 'version: 0.9' in fm, "版本应 >= 0.9.0（当前应为 0.9.5）"
+        import re as _re
+        _m = _re.search(r'version:\s*([0-9]+)\.([0-9]+)\.([0-9]+)', fm)
+        assert _m, "frontmatter 必须含 version 字段"
+        _ver = tuple(int(_m.group(i)) for i in range(1, 4))
+        assert _ver >= (0, 9, 0), f"版本应 >= 0.9.0，实际 {_ver}"
         assert "办公室 AI 提效助手" in fm, "方向 B：名称翻转为「办公室 AI 提效助手」"
         assert "执行与度量一体" in fm, "应诚实声明执行与度量一体（既做又记）"
         assert "自动记下" in fm, "应声明执行后自动记账"

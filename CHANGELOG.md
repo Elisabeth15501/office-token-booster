@@ -4,6 +4,22 @@
 
 ---
 
+## v1.0.0 — 参赛版正式发布（2026-09-05）
+
+对齐「参赛版」里程碑的正式发布，汇总自 v0.9.10 以来的全部能力并固化安全合规性，已通过天禧 AI 安全检测、可稳定上架技能广场。详见 [`RELEASE_NOTES.md`](RELEASE_NOTES.md)。
+
+**关键变更（相对 v0.9.12）：**
+- **版本号对齐为 `1.0.0`**：SKILL.md / config.yaml / CHANGELOG 统一 bump 至 `1.0.0`，与参赛里程碑同名，消除「版本≠能力」的观感（曾为 A 线 ADR-8 教训）。
+- **安全合规修复（承接天禧 AI 安全检测报告）**：
+  - `skill_recommender.py` 移除 `curl | bash/sh`、`npx skills add`、`clawhub install` 等远程管道安装命令，改为静态「按官方说明手动安装」指引，消除供应链投毒风险。
+  - `conversation.py` 的 `while True:` 改为带显式 `running` 标志的循环。
+  - `executor.py` 四处 `except Exception/except:` 改为具体异常类型并引入 `logging` 记录，不再静默吞错。
+  - `SKILL.md` 中 `ledger.json` 示例路径统一改为 `examples/ledger.json`，新增示例账本文件。
+- **新增 `RELEASE_NOTES.md`**：面向用户/参赛的完整发布说明。
+- **测试**：全量 **166 passed, 0 failed**（含 15 项质量护栏回归）。
+
+**安全自检**：`security_preflight scripts` → EXIT=0；上架包内联网/危险代码特征扫描 0 命中。
+
 ## v0.9.12 — 天禧AI 上架打包版（2026-09-04）
 
 对齐已推送 tag `v0.9.12`，并为天禧AI 技能广场上架做打包收敛：

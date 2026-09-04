@@ -3,7 +3,7 @@
 > 本文为「office-token-booster」在天禧 AI / SkillHub 上架所需的**使用示例**及其**配套答案演示**。
 > 每条示例包含：用户怎么说 → 技能实际执行什么 → 输出示意 → 一句话结论。
 >
-> ✅ **文中所有输出均为 v0.9.11 实跑截取**（`scripts/executor.py` / `scripts/report_engine.py` 真实运行结果），非虚构示意。
+> ✅ **文中所有输出均为 v1.0.0 实跑截取**（`scripts/executor.py` / `scripts/report_engine.py` 真实运行结果），非虚构示意。
 > 📌 配套账本示例数据（7 条、跨越两周）用于演示，可复现。
 
 ---
