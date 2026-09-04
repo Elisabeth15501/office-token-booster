@@ -4,6 +4,15 @@
 
 ---
 
+## v0.9.12 — 天禧AI 上架打包版（2026-09-04）
+
+对齐已推送 tag `v0.9.12`，并为天禧AI 技能广场上架做打包收敛：
+
+- **版本号对齐**：SKILL.md / config.yaml / CHANGELOG 统一为 `0.9.12`（此前与已推送的 `v0.9.12` tag 不一致）。
+- **网络声明收敛**：`network.outbound` 由 `true` 改为 `false`。原联网推荐（clawhub.ai / lightmake.site 技能市场）指向非天禧市场，且为安全审核红旗；上架包中**移除** `clawhub_client.py` / `skillhub_client.py`，仅保留本地推荐逻辑（`skill_recommender` 离线分支）。核心执行/度量/报告全流程本就纯本地、不读密钥、不联网。
+- **打包卫生**：上架 zip 仅含技能运行必需文件（SKILL.md / config.yaml / scripts/ 业务模块 / type_registry.json / 文档），排除 `__pycache__`、`.pytest_cache`、`allure-results`、`allure-report*.html`、`tests/`、`.github/`、`MANUAL_TEST_*`、`PUSH_TROUBLESHOOTING.md`、根目录 `test_phase2.py` / `test_clawhub.py` 等开发与测试产物。
+- **安全自检**：`security_preflight scripts` 仍 EXIT=0（无 R1 危险执行 / R2 网络外发 / R3 硬编码密钥 红线）。
+
 ## v0.9.11 — 「不降质量」护栏度量（北极星质量极落地）（2026-09-04）
 
 为北极星「在不降低交付质量的前提下，看清并降低 AI 使用成本/步骤」的质量极提供**可量化、零成本、可复现**的信号：每次 AI 交付后即刻评估其结构完整性，让「省了步骤/Token」的声明只有在质量保住时才可信。

@@ -1,6 +1,6 @@
 # OpenClaw / 天禧 AI 格式配置（替代原 WorkBuddy 的 config.json）
 name: office-token-booster
-version: 0.9.11
+version: 0.9.12
 display_name: 办公室提效助手
 description: 办公室重复任务自动化 + Token/耗时提效可视化
 author: Elisabeth15501
@@ -16,11 +16,8 @@ permissions:
     read: ["."]
     write: ["reports/", "ledger.json"]
 network:
-  outbound: true
-  allowed_domains:
-    - "lightmake.site"
-    - "clawhub.ai"
-  note: "仅用于搜索技能市场，不上传用户数据"
+  outbound: false
+  note: "天禧AI 上架版：联网推荐已禁用，仅本地推荐；核心链路纯本地、零联网"
 privacy:
   collects_personal_data: false
   uploads_data: false
