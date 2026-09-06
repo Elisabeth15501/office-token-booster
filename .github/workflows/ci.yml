@@ -32,6 +32,9 @@ jobs:
           mkdir -p public
           python tools/render_allure_html.py --results allure-results --output public/allure-report.html
 
+      - name: Build portfolio site (README / SKILL / examples / report / allure)
+        run: python tools/build_pages.py
+
       - name: Upload Allure HTML report (downloadable artifact)
         if: always()
         uses: actions/upload-artifact@v4
