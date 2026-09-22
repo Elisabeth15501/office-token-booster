@@ -39,6 +39,7 @@ from ledger_agent import (                                         # noqa: E402
     propose_entry, propose_automation_targets, run_long_chain)
 from report_engine import (                                        # noqa: E402
     generate_markdown_summary, generate_markdown_report)
+from type_registry import load_registry                            # noqa: E402  # 类型字典单一事实源（与 executor 共用）
 from executor import (  # noqa: E402  # Phase 3：execute 意图路由复用执行引擎
     resolve_exec_type as _resolve_exec_type,
     EXECUTORS as _EXECUTORS,
@@ -51,14 +52,12 @@ from executor import (  # noqa: E402  # Phase 3：execute 意图路由复用执�
 # ─────────────────────────────────────────────────────────────
 
 def _load_registry():
-    """读取类型字典；文件缺失/损坏时降级为空字典（退化为 v0.4 行为）。"""
-    registry_path = Path(__file__).resolve().parent / "type_registry.json"
-    try:
-        with open(registry_path, encoding="utf-8") as f:
-            data = json.load(f)
-        return data.get("types", {}) or {}
-    except (FileNotFoundError, json.JSONDecodeError, ValueError):
-        return {}
+    """读取类型字典；文件缺失/损坏时降级为空字典（退化为 v0.4 行为）。
+
+    实际读取委托给 `type_registry.load_registry`——字典的加载与容错规则只留一处，
+    对话层（本模块 `_detect_type`）与执行层（`executor.resolve_exec_type`）共用同一事实源。
+    """
+    return load_registry()
 
 
 # 模块加载时读取一次类型字典（供 _detect_type 全局复用）

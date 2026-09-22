@@ -70,12 +70,26 @@ _EXEC_ALIASES = {
     "slides": "PPT大纲",
 }
 
+# 类型字典标准名 → 执行引擎类型名 的桥接。
+# 两边词表不同源：字典用「文档撰写 / PPT制作」，执行引擎用「文档整理 / PPT大纲」，
+# 且字典只覆盖办公记账场景，故只有确属引擎能力的标准名才桥接，其余一律不映射：
+# 「代码编写」交 IDE 类 Skill，「邮件草拟」是本技能 non-goal（不代收发邮件）。
+_REGISTRY_TO_EXEC = {
+    "周报生成": "周报生成",
+    "数据分析": "数据分析",
+    "文档撰写": "文档整理",
+    "PPT制作": "PPT大纲",
+}
+
 
 def resolve_exec_type(task_type: str) -> Optional[str]:
     """把用户给的 task_type 归一到执行引擎支持的标准名；不支持则返回 None。"""
     if _REGISTRY is not None:
         try:
+            # 先查字典拿标准名，再经桥接表换算成执行引擎自己的类型词表
             norm = normalize_type(task_type, _REGISTRY)
+            if norm in _REGISTRY_TO_EXEC:
+                return _REGISTRY_TO_EXEC[norm]
             if norm in _EXEC_ALIASES.values():
                 return norm
         except (TypeError, ValueError, KeyError, AttributeError) as e:

@@ -32,6 +32,7 @@ from executor import (  # noqa: E402
     export_xlsx,
 )
 import host_hook  # noqa: E402  # 方向 B 宿主钩子闭环
+from type_registry import load_registry, normalize_type  # noqa: E402  # 类型字典加载器
 
 pytestmark = [
     pytest.mark.layer("execution"),
@@ -52,6 +53,48 @@ def test_resolve_exec_type_coverage():
     for alias in ["周报", "周报生成", "weekly", "纪要", "会议纪要", "数据分析", "文档整理", "要点提炼", "PPT大纲", "slides"]:
         assert resolve_exec_type(alias) is not None, f"未识别别名：{alias}"
     assert resolve_exec_type("完全不相关的任务xyz") is None
+
+
+@allure.title("v1.0.1 回归：类型字典必须真正接入执行引擎，不再静默退化为直匹配")
+@allure.severity(allure.severity_level.CRITICAL)
+@allure.description(
+    "守卫历史缺陷：executor 以 `from type_registry import load_registry, normalize_type` "
+    "引用了一个不存在的 .py（当时只有 type_registry.json），import 每次都失败并被外层 except 吞掉，"
+    "于是 v0.5「查表代替猜」在执行层从未生效，只靠 _EXEC_ALIASES 直匹配兜着。"
+    "上一节的别名全部在 _EXEC_ALIASES 里，所以缺陷一路溜过了 142 个测试。"
+)
+def test_type_registry_actually_wired_into_executor():
+    with allure.step("字典确实加载成功（非 None / 非空），执行层没有再退化"):
+        assert executor._REGISTRY, "type_registry 未加载，执行层又退化成直匹配了"
+        assert "周报生成" in executor._REGISTRY
+
+    with allure.step("只有走字典才可能命中的别名，必须归一到执行引擎类型（旧实现一律返回 None）"):
+        assert resolve_exec_type("报表") == "数据分析"      # 字典别名，_EXEC_ALIASES 里没有
+        assert resolve_exec_type("写材料") == "文档整理"    # 文档撰写 → 桥接 → 文档整理
+        assert resolve_exec_type("做ppt") == "PPT大纲"      # PPT制作 → 桥接 → PPT大纲
+
+    with allure.step("字典里有、但不属于执行引擎能力的类型不得被桥接进来"):
+        assert resolve_exec_type("写代码") is None          # 代码编写：交 IDE 类 Skill
+        assert resolve_exec_type("发邮件") is None          # 邮件草拟：本技能 non-goal
+
+
+@allure.title("v1.0.1 类型字典加载器：精确归一 + 缺失/损坏/脏数据结构一律安全降级")
+@allure.severity(allure.severity_level.NORMAL)
+def test_type_registry_loader_and_degradation(tmp_path):
+    reg = load_registry()
+    with allure.step("归一优先级：标准名/别名精确匹配（忽略大小写与空白），认不出则原样返回"):
+        assert reg and normalize_type("Weekly", reg) == "周报生成"
+        assert normalize_type("  会议纪要  ", reg) == "会议纪要"   # 字典无此类型，交上层兜底
+        assert normalize_type("", reg) == ""
+
+    with allure.step("降级：文件缺失 / JSON 损坏 / 别名不是列表，都不抛异常"):
+        assert load_registry(tmp_path / "不存在.json") == {}
+        broken = tmp_path / "坏字典.json"
+        broken.write_text("{不是合法JSON", encoding="utf-8")
+        assert load_registry(broken) == {}
+        dirty = tmp_path / "脏字典.json"
+        dirty.write_text('{"types": {"坏条目": "不是列表", "周报生成": ["周报"]}}', encoding="utf-8")
+        assert load_registry(dirty) == {"周报生成": ["周报"]}
 
 
 # --------------------------------------------------------------------------
@@ -207,12 +250,12 @@ def test_export_xlsx_fallback(monkeypatch, tmp_path):
         assert "score" in txt and "60.00" in txt
 
 
-docx_mod = pytest.importorskip("docx")
-
-
 @allure.title("v1.0 执行引擎：docx 存在时生成真实 .docx（含标题与要点）")
 @allure.severity(allure.severity_level.CRITICAL)
 def test_export_docx_real(tmp_path):
+    # 可选依赖检查放在用例内：模块级 importorskip 会让整份文件被整体跳过，
+    # 从而把与本用例无关的执行引擎回归（含类型字典接线守卫）一起静默失效。
+    docx_mod = pytest.importorskip("docx")
     md = "# 周报\n- 完成A\n- 完成B"
     path, status = export_docx(md, str(tmp_path / "r.docx"), "周报")
     with allure.step("断言真实 docx 含结构化内容"):
@@ -223,12 +266,10 @@ def test_export_docx_real(tmp_path):
         assert any("完成A" in t for t in texts)
 
 
-openpyxl_mod = pytest.importorskip("openpyxl")
-
-
 @allure.title("v1.0 执行引擎：xlsx 存在时生成真实 .xlsx（内容+表 sheet）")
 @allure.severity(allure.severity_level.CRITICAL)
 def test_export_xlsx_real(tmp_path):
+    openpyxl_mod = pytest.importorskip("openpyxl")  # 同上：可选依赖只在用例内跳过，不牵连整份文件
     md = "# 数据分析\n| 字段 | 求和 |\n|---|---|\n| score | 60.00 |"
     path, status = export_xlsx(md, str(tmp_path / "d.xlsx"), "数据分析")
     with allure.step("断言真实 xlsx 含数据与表 sheet"):
