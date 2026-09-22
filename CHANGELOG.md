@@ -4,6 +4,27 @@
 
 ---
 
+## v1.0.1 — 接上类型字典 + 修复被静默跳过的执行引擎测试（2026-09-23）
+
+装到千问办公后做冒烟时发现：`executor.py` 每次执行都打一句 `type_registry 加载失败，任务类型归一将退化为直匹配`。顺着这条告警挖出两个叠加的缺陷——**v0.5 的类型字典在执行层从未生效**，而且**负责守卫执行引擎的那份测试文件根本没被收集**。
+
+### 修复
+
+- **补齐缺失的 `scripts/type_registry.py`**：`executor.py` 从一开始就按 `from type_registry import load_registry, normalize_type` 写，但仓库里只有数据文件 `type_registry.json`，没有这个 `.py`（JSON 不能被 `import`）。于是那行 import 每次都抛 `ModuleNotFoundError`、被外层 `except` 静默吞掉，v0.5「查表代替猜」在执行层退化成 `_EXEC_ALIASES` 直匹配。新模块提供 `load_registry()` / `normalize_type()`，语义与 `conversation._load_registry` 一致，字典缺失/损坏/脏结构一律降级为空表、绝不抛异常打断任务。
+- **`executor.py` 新增 `_REGISTRY_TO_EXEC` 桥接表**：字典用记账词表（文档撰写 / PPT制作），引擎用执行词表（文档整理 / PPT大纲），不桥接则字典命中也接不上。`代码编写`（交 IDE 类 Skill）与 `邮件草拟`（本技能 non-goal）**故意不桥接**，仍返回 `None`。
+- **`conversation._load_registry` 改为委托** `type_registry.load_registry`，让 README 里「类型字典单一事实源」的说法真正成立（此前对话层与执行层各读各的）。
+- **`SKILL.md` 断链修正**：`[QUICKSTART.md](../QUICKSTART.md)` → 同级 `QUICKSTART.md`（SKILL.md 本就在仓库根，这个链接在安装目录和仓库里都是断的）。
+
+### 行为变更（patch 版本号下的唯一增量）
+
+- 仅存在于字典别名中的说法现在能被执行引擎识别：`报表` → 数据分析、`写材料` → 文档整理、`做ppt` → PPT大纲（此前一律返回「不支持的类型」）。字典外的原有别名与子串兜底行为不变。
+
+### 测试
+
+- **修复 `tests/test_v10_executor.py` 被整份跳过**：文件第 253/269 行的**模块级** `pytest.importorskip("docx")` / `("openpyxl")` 会在可选依赖缺失时让**整个模块停止收集**，21 个执行引擎用例（含类型归一守卫）在干净环境下静默消失、且不计入失败。已把两处依赖检查移进各自用例内部，只跳真正需要它们的那 2 个用例。
+- **新增 2 个回归用例**：`test_type_registry_actually_wired_into_executor`（断言字典真加载 + 只有走字典才可能命中的别名 + non-goal 类型不得被桥接）、`test_type_registry_loader_and_degradation`（文件缺失 / JSON 损坏 / 别名非列表三档降级）。守卫点刻意选在「旧实现必失败」的行为上，缺陷再溜不过去。
+- 全量 **165 passed, 3 skipped**（本机未装 `python-docx` / `openpyxl` 两项可选导出依赖；补齐依赖后 168 passed, 0 skipped）。修复前为 142 passed——多出的 23 例正是被整文件跳过而隐身的执行引擎回归。
+
 ## v1.0.0 — 参赛版正式发布（2026-09-05）
 
 对齐「参赛版」里程碑的正式发布，汇总自 v0.9.10 以来的全部能力并固化安全合规性，已通过天禧 AI 安全检测、可稳定上架技能广场。详见 [`RELEASE_NOTES.md`](RELEASE_NOTES.md)。

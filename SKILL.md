@@ -1,7 +1,7 @@
 ---
 name: office-token-booster
 description: "办公室 AI 提效助手 —— 既帮你做周报/会议纪要/数据分析/文档整理/PPT 大纲，又自动记下每次帮你省了多少 Token 和时间。执行与度量一体：做完任务顺手记一笔，省了多少一目了然。适用于办公生产力执行、AI 用量洞察、提效度量与自动化决策场景。"
-version: 1.0.0
+version: 1.0.1
 author: Elisabeth15501
 license: MIT
 tags:
@@ -129,7 +129,7 @@ metadata:
 
 ## 快速开始（QUICKSTART）
 
-> 完整 hands-on 实操（含 PowerShell 注意事项、常见任务示例）见仓库根 **[QUICKSTART.md](../QUICKSTART.md)**。下面给出方向 B 的核心闭环速览。
+> 完整 hands-on 实操（含 PowerShell 注意事项、常见任务示例）见同目录 **[QUICKSTART.md](QUICKSTART.md)**。下面给出方向 B 的核心闭环速览。
 
 零依赖（纯标准库 Python ≥3.10），从项目目录即可跑通「做任务 → 自动记账 → 看报告」闭环。
 
