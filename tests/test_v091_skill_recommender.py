@@ -115,8 +115,10 @@ class TestFormatRecommendations:
         ]
         md = format_recommendations_md(recs)
         assert "ponytail" in md
-        assert "clawhub install ponytail" in md
         assert "-22% Token" in md
+        # 安装确认模块已移除：不应再出现安装指令与确认提示
+        assert "clawhub install ponytail" not in md
+        assert "安装确认" not in md
 
     def test_html_format_contains_keys(self):
         """HTML 格式包含关键信息"""
@@ -131,7 +133,9 @@ class TestFormatRecommendations:
         ]
         html = format_recommendations_html(recs)
         assert "caveman" in html
-        assert "npx skills add" in html
+        # 安装确认模块已移除：不应再出现安装指令与确认橙框
+        assert "npx skills add" not in html
+        assert "安装确认" not in html
 
     def test_empty_recommendations_md(self):
         """空推荐返回提示文本"""

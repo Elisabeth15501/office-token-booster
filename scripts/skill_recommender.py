@@ -264,7 +264,7 @@ def recommend_skills(
 
 
 def format_recommendation_md(rec: SkillRecommendation) -> str:
-    """将单条推荐格式化为 Markdown（含安装确认提示）。"""
+    """将单条推荐格式化为 Markdown。"""
     lines = [
         f"### 🎯 推荐：{rec.skill}",
         "",
@@ -299,20 +299,6 @@ def format_recommendation_md(rec: SkillRecommendation) -> str:
     if rec.evidence_url:
         lines.append(f"- **数据来源**：[{rec.evidence_url}]({rec.evidence_url})")
 
-    # 安装确认提示（必须用户亲自确认）
-    lines += [
-        "",
-        "⚠️ **安装确认**：",
-        "",
-        f"> 请确认无误后，手动运行以下命令安装：",
-        "",
-        f"```bash",
-        f"{rec.install_cmd}",
-        f"```",
-        "",
-        "> 🛡️ **安全提示**：安装 Skill 会修改你的 `.workbuddy/` 目录。",
-        "> 如需回滚，可手动删除对应目录。",
-    ]
     lines.append("")
     return "\n".join(lines)
 
@@ -329,7 +315,7 @@ def format_recommendations_md(recommendations: list[SkillRecommendation]) -> str
 
 
 def format_recommendations_html(recommendations: list[SkillRecommendation]) -> str:
-    """将推荐列表格式化为 HTML 板块（含安装确认提示）。"""
+    """将推荐列表格式化为 HTML 板块。"""
     if not recommendations:
         return """
     <h2>推荐 Skill</h2>
@@ -365,12 +351,6 @@ def format_recommendations_html(recommendations: list[SkillRecommendation]) -> s
       <div style="font-size: 13px; color: var(--fg); margin-bottom: 6px;">{_esc(rec.reason)}</div>
       <div style="font-size: 13px; color: var(--accent); font-weight: 600; margin-bottom: 6px;">预期节省：{_esc(rec.expected_saving)}</div>
       {hub_info_html}
-      <div style="margin-top:12px;padding:10px;background:#fff7ed;border-radius:6px;border:1px solid #fed7aa;">
-        <div style="font-size:12px;font-weight:600;color:#9a3412;margin-bottom:6px;">⚠️ 安装确认</div>
-        <div style="font-size:12px;color:#7c2d12;margin-bottom:6px;">请确认无误后，手动运行以下命令安装：</div>
-        <pre style="background:#f3f4f6;padding:8px;border-radius:4px;overflow-x:auto;font-size:11px;"><code style="color:#111827;">{_esc(rec.install_cmd)}</code></pre>
-        <div style="font-size:11px;color:#9a3412;margin-top:6px;">🛡️ 安全提示：安装 Skill 会修改你的 <code>.workbuddy/</code> 目录。如需回滚，可手动删除对应目录。</div>
-      </div>
       {f'<div style="font-size: 11px; color: var(--muted); margin-top: 6px;">来源：<a href="{_safe_url(rec.evidence_url)}" target="_blank">{_esc(rec.evidence_url)}</a></div>' if _safe_url(rec.evidence_url) else ''}
     </div>"""
         cards.append(card)
