@@ -138,9 +138,9 @@ def answer_followup(diag, question):
                 f"时间节省比例 {diag.time_save_pct:.1f}%。")
 
     # 哪个类型「消耗」Token 最多（实耗，而非节省）—— 须置于「节省最多」分支之前。
-    # 关键词命中「消耗/用量/占用/实耗/花掉/用了多少/花了多少/用掉/用得最多」即视为「消耗」意图，
+    # 关键词命中「消耗/用量/占用/实耗/花掉/用了多少/花了多少/用掉/用得最多/最费/费token/费钱/耗费最多」即视为「消耗」意图，
     # 但同期若显式问「省/节省」，则交给下方「节省最多」分支处理（避免误判）。
-    if any(k in q for k in ("消耗", "用量", "占用", "实耗", "花掉", "用了多少", "花了多少", "用掉", "用得最多")):
+    if any(k in q for k in ("消耗", "用量", "占用", "实耗", "花掉", "用了多少", "花了多少", "用掉", "用得最多", "最费", "费token", "费钱", "耗费最多")):
         if not any(k in q for k in ("省", "节省", "省下")):
             cons = _consume_most_type(diag)
             if cons:
@@ -151,8 +151,8 @@ def answer_followup(diag, question):
                 )
             return "暂无可统计的任务类型。"
 
-    # 哪个类型节省最多
-    if any(k in q for k in ("最多", "最高", "主力", "第一", "最大", "top", "Top")):
+    # 哪个类型节省最多（含「最省 / 省最多 / 最划算」等口语说法，避免落到通用帮助，Issue #2）
+    if any(k in q for k in ("最多", "最高", "主力", "第一", "最大", "top", "Top", "最省", "省最多", "省得最多", "最划算")):
         top = _top_type(diag)
         if top:
             return (f"节省最多的任务类型是「{top['task_type']}」：{top['count']} 次共省 "

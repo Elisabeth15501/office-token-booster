@@ -107,8 +107,23 @@ def resolve_exec_type(task_type: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 # 通用工具
 # ---------------------------------------------------------------------------
+# 行首列表标记（Markdown 项目符号 / 有序列表 / 全角圆点）。用户在粘贴要点时
+# 常自带 "- " / "* " / "1. "，渲染层会无条件再加一次 "- " → 双层子弹「- - 」。
+# 一处剥离覆盖全部走 [f"- {x}" for x in ...] 的渲染器（周报/纪要/PPT/要点提炼）。
+_RE_BULLET = re.compile(r"^\s*(?:[-*+•·]|\d+[.)、])\s+")
+
+# 完成类动词：命中即视为「陈述已完成的工作」，不应被风险关键词抢走（Issue #1）。
+_RE_DONE_VERB = re.compile(r"发现|定位|修复|完成|已|上线|提交|解决|搞定|处理", re.I)
+
+
 def _lines(text: str) -> list[str]:
-    return [ln.strip() for ln in text.splitlines() if ln.strip()]
+    out = []
+    for ln in text.splitlines():
+        s = _RE_BULLET.sub("", ln).strip()
+        # 整行只剩一个孤立符号（如纯 "-"/"*"）视为空，丢弃
+        if s and s not in {"-", "*", "•"}:
+            out.append(s)
+    return out
 
 
 def _today_iso() -> str:
@@ -164,9 +179,12 @@ def render_weekly_report(text: str) -> str:
                 content = pat.sub("", s).strip() or s
                 return name, content
         # 2) 无显式前缀时，按关键词兜底（与旧逻辑一致，关键词已预编译 —— S7）
+        #    风险判定加语义门槛：仅当行内「无完成类动词」时才判为风险，
+        #    避免「发现问题 / 解决问题」这类中性句被「问题/issue」抢进风险节（Issue #1）。
+        #    显式锚点（风险：…）仍优先，不在此门槛约束内。
         if _RE_WEEKLY_PLAN_KW.search(s):
             return "plan", s
-        if _RE_WEEKLY_RISK_KW.search(s):
+        if _RE_WEEKLY_RISK_KW.search(s) and not _RE_DONE_VERB.search(s):
             return "risk", s
         if _RE_WEEKLY_OVERVIEW_KW.search(s) and not work:
             return "overview", s
