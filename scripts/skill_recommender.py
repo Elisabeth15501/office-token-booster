@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""skill_recommender.py — office-token-booster v0.9.2 Skill 推荐引擎
+"""skill_recommender.py — office-token-booster Skill 推荐引擎
 
 根据用户用量数据推荐最适合的「省 Token」Skill。
 
 设计原则：
-- Phase 1：纯函数，无副作用，硬编码推荐规则表（task_type → skill 映射）
-- Phase 2：支持 SkillHub 联网搜索，动态获取最新 Skill 信息
-- ⚠️ 安装是危险动作，必须用户亲自确认才能执行
-- 每个推荐附带量化依据（benchmark 数据），不夸大的承诺
+- 纯本地静态规则表（task_type → skill 映射），**无联网、无副作用**
+- 推荐的第三方 Skill 与节省数字引自其公开自述（README / benchmark），
+  **未经本技能实测验证**，输出时明确标注，仅供参考
+- ⚠️ 安装是危险动作，本技能不代装：仅给出来源链接，由用户自行判断
 - 最多返回 3 个推荐，避免推荐过载
 """
 
@@ -41,11 +41,7 @@ class SkillRecommendation:
     install_cmd: str                    # 安装指引（本平台不开放自动安装，仅提供来源链接）
     expected_saving: str                # 预期节省（来自 benchmark，标注来源）
     priority: str = "MEDIUM"           # CRITICAL / HIGH / MEDIUM
-    evidence_url: Optional[str] = None  # 数据来源链接（可选）
-    # Phase 2 新增字段
-    skillhub_slug: Optional[str] = None  # SkillHub slug（用于联网查询）
-    skillhub_info: Optional[dict] = None  # SkillHub 详情（搜索后填充）
-    clawhub_info: Optional[dict] = None   # ClawHub 详情（搜索后填充）
+    evidence_url: Optional[str] = None  # 数据来源链接（可选，未经本技能验证）
     requires_confirmation: bool = True  # 是否需用户确认才安装（当前仅作展示，不执行任何命令）
 
 
@@ -64,7 +60,6 @@ _TASK_TYPE_RULES = [
             expected_saving="-22% Token (Ponytail agentic benchmark, 12 tasks, Haiku 4.5)",
             priority="HIGH",
             evidence_url="https://github.com/DietrichGebert/ponytail",
-            skillhub_slug="ponytail",
         ),
     },
     {
@@ -76,7 +71,6 @@ _TASK_TYPE_RULES = [
             expected_saving="-65% output tokens (Caveman README, 10-task benchmark)",
             priority="HIGH",
             evidence_url="https://github.com/JuliusBrussee/caveman",
-            skillhub_slug="caveman",
         ),
     },
     {
@@ -87,7 +81,6 @@ _TASK_TYPE_RULES = [
         "expected_saving": "-89% CLI noise (RTK benchmark, 2,900+ commands)",
         "priority": "MEDIUM",
         "evidence_url": "https://github.com/rtk-ai/rtk",
-        "skillhub_slug": "rtk",
     },
     {
         "keywords": ["周报", "纪要", "会议纪要", "总结", "报告"],
@@ -98,7 +91,6 @@ _TASK_TYPE_RULES = [
             expected_saving="-31% bill on average (token-diet Sonnet 5 benchmark)",
             priority="MEDIUM",
             evidence_url="https://github.com/Kulaxyz/token-diet",
-            skillhub_slug="token-diet",
         ),
     },
 ]
@@ -136,15 +128,13 @@ def recommend_skills(
     by_type: list[dict],
     total_tasks: int,
     max_recommendations: int = 3,
-    use_online_search: bool = False,
 ) -> list[SkillRecommendation]:
-    """根据用量数据推荐最适合的省 Token Skill。
+    """根据用量数据推荐最适合的省 Token Skill（纯本地静态规则，不联网）。
 
     Args:
         by_type: 按任务类型聚合的统计数据，每项含 task_type / baseline_tokens / skill_tokens 等
         total_tasks: 总任务数（对应 Diagnosis.n）
         max_recommendations: 最多返回几条推荐
-        use_online_search: 是否启用 SkillHub 联网搜索（Phase 2）
 
     Returns:
         SkillRecommendation 列表，按 priority 降序排列
@@ -170,7 +160,6 @@ def recommend_skills(
                         expected_saving=rec.expected_saving,
                         priority=rec.priority,
                         evidence_url=rec.evidence_url,
-                        skillhub_slug=rec.skillhub_slug,
                         requires_confirmation=True,
                     )
                 elif isinstance(rec, str):
@@ -185,7 +174,6 @@ def recommend_skills(
                         expected_saving=rule_data["expected_saving"],
                         priority=rule_data.get("priority", "MEDIUM"),
                         evidence_url=rule_data.get("evidence_url"),
-                        skillhub_slug=rule_data.get("skillhub_slug"),
                         requires_confirmation=True,
                     )
                 # 去重：只保留第一个匹配（最高优先级）
@@ -210,56 +198,6 @@ def recommend_skills(
 
     result = sorted_recs[:max_recommendations]
 
-    # 4. Phase 2：联网搜索补充信息（可选）
-    if use_online_search and result:
-        from skillhub_client import search_token_saving_skills
-        from clawhub_client import search_clawhub
-
-        # 搜索 SkillHub
-        try:
-            online_skills = search_token_saving_skills(limit=10)
-            for rec in result:
-                if rec.skillhub_slug and not rec.skillhub_info:
-                    # 尝试从搜索结果中找到匹配的 Skill
-                    for skill in online_skills.skills:
-                        if skill.slug == rec.skillhub_slug or skill.name.lower() == rec.skill.lower():
-                            rec.skillhub_info = {
-                                "source": "skillhub",
-                                "slug": skill.slug,
-                                "name": skill.name,
-                                "description": skill.description_zh,
-                                "stars": skill.stars,
-                                "installs": skill.installs,
-                                "homepage": skill.homepage,
-                                "tags": skill.tags,
-                            }
-                            break
-        except Exception as e:
-            print(f"[SkillRecommender] SkillHub search failed: {e}", file=__import__("sys").stderr)
-
-        # 搜索 ClawHub
-        try:
-            clawhub_skills = search_clawhub(result[0].skill, limit=5)
-            for rec in result:
-                if not rec.clawhub_info:
-                    # 尝试匹配
-                    for skill in clawhub_skills.skills:
-                        if skill.slug == rec.skill or skill.name.lower() == rec.skill.lower():
-                            rec.clawhub_info = {
-                                "slug": skill.slug,
-                                "name": skill.name,
-                                "summary": skill.summary,
-                                "owner": skill.owner,
-                                "stars": skill.stars,
-                                "installs": skill.installs,
-                                "tags": skill.tags,
-                                "homepage": skill.homepage,
-                                "install_ref": skill.install_ref,
-                            }
-                            break
-        except Exception as e:
-            print(f"[SkillRecommender] ClawHub search failed: {e}", file=__import__("sys").stderr)
-
     return result
 
 
@@ -269,35 +207,11 @@ def format_recommendation_md(rec: SkillRecommendation) -> str:
         f"### 🎯 推荐：{rec.skill}",
         "",
         f"- **原因**：{rec.reason}",
-        f"- **预期节省**：{rec.expected_saving}",
+        f"- **预期节省**：{rec.expected_saving}（引自第三方项目自述，未经本技能实测验证，仅供参考）",
     ]
 
-    # 如果有 SkillHub 信息，显示详细数据
-    if rec.skillhub_info:
-        info = rec.skillhub_info
-        lines.append(f"- **SkillHub**：⭐{info.get('stars', 0)} | {info.get('installs', 0)} 安装")
-        if info.get('description'):
-            lines.append(f"- **描述**：{info['description'][:100]}...")
-        if info.get('homepage'):
-            lines.append(f"- **仓库**：{info['homepage']}")
-        if info.get('tags'):
-            lines.append(f"- **标签**：{', '.join(info['tags'][:5])}")
-
-    # 如果有 ClawHub 信息，显示详细数据
-    if rec.clawhub_info:
-        info = rec.clawhub_info
-        lines.append(f"- **ClawHub**：⭐{info.get('stars', 0)} | {info.get('installs', 0)} 安装")
-        if info.get('summary'):
-            lines.append(f"- **描述**：{info['summary'][:100]}...")
-        if info.get('owner'):
-            lines.append(f"- **作者**：{info['owner']}")
-        if info.get('homepage'):
-            lines.append(f"- **仓库**：{info['homepage']}")
-        if info.get('tags'):
-            lines.append(f"- **标签**：{', '.join(info['tags'][:5])}")
-
     if rec.evidence_url:
-        lines.append(f"- **数据来源**：[{rec.evidence_url}]({rec.evidence_url})")
+        lines.append(f"- **数据来源**：[{rec.evidence_url}]({rec.evidence_url})（未经验证的第三方链接）")
 
     lines.append("")
     return "\n".join(lines)
@@ -308,7 +222,9 @@ def format_recommendations_md(recommendations: list[SkillRecommendation]) -> str
     if not recommendations:
         return "## 推荐 Skill\n\n暂无匹配推荐。当你有更多任务数据后，系统会智能推荐合适的省 Token Skill。\n"
 
-    lines = ["## 推荐 Skill\n", "> 基于你的任务类型和消耗量，推荐以下 Skill 来降低 Token 成本：\n"]
+    lines = ["## 推荐 Skill\n",
+             "> 基于你的任务类型和消耗量，推荐以下 Skill 来降低 Token 成本。\n"
+             "> ⚠️ 推荐来自本地静态规则，节省数字引自第三方项目自述，**未经本技能实测验证**，仅供参考：\n"]
     for rec in recommendations:
         lines.append(format_recommendation_md(rec))
     return "\n".join(lines)
@@ -327,36 +243,17 @@ def format_recommendations_html(recommendations: list[SkillRecommendation]) -> s
         priority_emoji = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟢"}.get(rec.priority, "⚪")
         priority_color = '#dc2626' if rec.priority == 'CRITICAL' else '#ea580c' if rec.priority == 'HIGH' else '#16a34a'
 
-        # SkillHub 信息
-        hub_info_html = ""
-        if rec.skillhub_info:
-            info = rec.skillhub_info
-            stars = info.get('stars', 0)
-            installs = info.get('installs', 0)
-            desc = _esc(info.get('description', '')[:80] + '...') if info.get('description') else '暂无描述'
-            tags_html = ''.join(f"<span style='background:#e5e7eb;padding:2px 6px;border-radius:4px;font-size:11px;margin-right:4px'>{_esc(t)}</span>" for t in info.get('tags', [])[:5])
-
-            hub_info_html = f"""
-            <div style="margin-top:8px;padding:8px;background:#f0f9ff;border-radius:6px;font-size:12px;">
-              <div style="font-weight:600;color:#0369a1;margin-bottom:4px;">📦 SkillHub 信息</div>
-              <div style="color:#475569;">⭐{stars} | {installs} 安装</div>
-              <div style="color:#64748b;margin-top:4px;">{desc}</div>
-              {f'<div style="margin-top:6px;">{tags_html}</div>' if info.get('tags') else ''}
-              {f'<div style="margin-top:4px;"><a href="{_safe_url(info["homepage"])}" target="_blank" style="color:#2563eb;font-size:11px;">查看仓库</a></div>' if info.get('homepage') else ''}
-            </div>"""
-
         card = f"""
     <div class="rec-card" style="border-left: 4px solid {priority_color}; margin: 12px 0; padding: 14px; background: #f9fafb; border-radius: 8px;">
       <div style="font-weight: 700; font-size: 16px; margin-bottom: 8px;">{priority_emoji} {_esc(rec.skill)}</div>
       <div style="font-size: 13px; color: var(--fg); margin-bottom: 6px;">{_esc(rec.reason)}</div>
-      <div style="font-size: 13px; color: var(--accent); font-weight: 600; margin-bottom: 6px;">预期节省：{_esc(rec.expected_saving)}</div>
-      {hub_info_html}
-      {f'<div style="font-size: 11px; color: var(--muted); margin-top: 6px;">来源：<a href="{_safe_url(rec.evidence_url)}" target="_blank">{_esc(rec.evidence_url)}</a></div>' if _safe_url(rec.evidence_url) else ''}
+      <div style="font-size: 13px; color: var(--accent); font-weight: 600; margin-bottom: 6px;">预期节省：{_esc(rec.expected_saving)}（引自第三方自述，未经本技能实测验证）</div>
+      {f'<div style="font-size: 11px; color: var(--muted); margin-top: 6px;">来源（未经验证的第三方链接）：<a href="{_safe_url(rec.evidence_url)}" target="_blank">{_esc(rec.evidence_url)}</a></div>' if _safe_url(rec.evidence_url) else ''}
     </div>"""
         cards.append(card)
 
     html = """
     <h2>推荐 Skill</h2>
-    <p style="color:var(--muted); font-size: 13px;">基于你的任务类型和消耗量，推荐以下 Skill 来降低 Token 成本：</p>
+    <p style="color:var(--muted); font-size: 13px;">基于你的任务类型和消耗量，推荐以下 Skill 来降低 Token 成本。推荐来自本地静态规则，节省数字引自第三方项目自述，<strong>未经本技能实测验证</strong>，仅供参考。</p>
     """ + "\n".join(cards)
     return html

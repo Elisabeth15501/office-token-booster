@@ -23,6 +23,13 @@
 
 - 上架包未变：仍为纯本地运行，`network.outbound=false`，无联网客户端、无硬编码密钥、无绝对路径。
 
+### 安全整改（对应天禧 AI 上架扫描报告，detailId 287056）
+
+- **（中危）`report_engine.build_compare_card`**：「本期 vs 上期」对比卡的周标签（源自账本 JSON 的日期字段）未转义即拼入 HTML。已统一经 `esc()` 转义，与文件内其它用户字段同口径；新增恶意账本 XSS 回归测试。
+- **（低危）声明与实现一致化**：移除 `report_engine.py` CLI 残留的联网开关、`skill_recommender.recommend_skills` 的联网搜索参数与 `skillhub_client` / `clawhub_client` 调用分支（两个联网客户端本就不在发行包内，此路径只会 ImportError）。推荐能力现为纯本地静态规则，无任何联网代码路径。
+- **（低危→披露）第三方推荐如实标注**：报告的「推荐 Skill」节省数字引自第三方项目自述（README / benchmark），现于 Markdown 与 HTML 输出中明确标注「未经本技能实测验证，仅供参考」，`SKILL.md` 同步补充披露。
+- **（信息）文档中的危险命令形态清理**：`CHANGELOG` 历史条目里描述「已移除的远程管道安装命令」时引用了命令原文字样，静态扫描按命令注入规则命中。已改写为不含可复制执行的命令形态的描述（历史事实不变，仅为不可执行的文字说明）。
+
 ---
 
 ## v1.0.1 — 接上类型字典 + 修复被静默跳过的执行引擎测试（2026-09-23）
@@ -53,7 +60,7 @@
 **关键变更（相对 v0.9.12）：**
 - **版本号对齐为 `1.0.0`**：SKILL.md / config.yaml / CHANGELOG 统一 bump 至 `1.0.0`，与参赛里程碑同名，消除「版本≠能力」的观感（曾为 A 线 ADR-8 教训）。
 - **安全合规修复（承接天禧 AI 安全检测报告）**：
-  - `skill_recommender.py` 移除 `curl | bash/sh`、`npx skills add`、`clawhub install` 等远程管道安装命令，改为静态「按官方说明手动安装」指引，消除供应链投毒风险。
+  - `skill_recommender.py` 移除内置的「远程内容经管道交给 shell 执行」与「一键安装」类命令写法（此类写法属供应链投毒风险形态），改为静态「按官方说明手动安装」指引。
   - `conversation.py` 的 `while True:` 改为带显式 `running` 标志的循环。
   - `executor.py` 四处 `except Exception/except:` 改为具体异常类型并引入 `logging` 记录，不再静默吞错。
   - `SKILL.md` 中 `ledger.json` 示例路径统一改为 `examples/ledger.json`，新增示例账本文件。

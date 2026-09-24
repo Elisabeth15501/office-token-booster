@@ -46,7 +46,7 @@ from diagnose import format_number, load_ledger, diagnose, Diagnosis, _safe_div
 import html as _html
 # P2 安全：所有进 HTML 的用户字段必须经此转义，杜绝 <script> 等注入。
 _esc = _html.escape
-from skill_recommender import recommend_skills, format_recommendations_md, format_recommendations_html
+from skill_recommender import recommend_skills, format_recommendations_html
 
 
 # ─────────────────────────────────────────────────────────────
@@ -214,7 +214,7 @@ def build_compare_card(pc):
     cur, prev = pc["current"], pc["previous"]
     return f"""
     <div class="cmp-card">
-      <div class="cmp-title">📈 本期 vs 上期（{pc['current_week']} 对比 {pc['previous_week']}）</div>
+      <div class="cmp-title">📈 本期 vs 上期（{_esc(pc['current_week'])} 对比 {_esc(pc['previous_week'])}）</div>
       <div class="cmp-grid">
         <div><span class="cmp-k">省 Token</span><span class="cmp-v">{format_number(cur['saved_tokens'])}</span>
             <span class="cmp-d {pc['direction']}">{arrow} {_fmt_pct(pc['saved_tokens_pct'])}</span></div>
@@ -266,7 +266,7 @@ def build_roi_card(roi_targets, top_n=3):
 # Markdown 报告（九段结构，办公域适配）
 # ─────────────────────────────────────────────────────────────
 
-def generate_markdown_report(s, *, use_online_search=False):
+def generate_markdown_report(s):
     L = []
     L.append("# 办公室提效报告")
     L.append("")
@@ -367,8 +367,8 @@ def generate_markdown_report(s, *, use_online_search=False):
         L.append(f"- {x}")
     L.append("")
 
-    # 九、推荐 Skill（v0.9.2 新增联网搜索）
-    recs = recommend_skills(s.by_type, s.n, use_online_search=use_online_search)
+    # 九、推荐 Skill（本地静态规则，无联网）
+    recs = recommend_skills(s.by_type, s.n)
     if recs:
         L.append("## 九、推荐 Skill")
         L.append("")
@@ -458,7 +458,7 @@ def _quality_cell(q, floor):
     return f'<td style="color:{color};font-weight:600">{q}</td>'
 
 
-def generate_html_report(s, *, use_online_search=False):
+def generate_html_report(s):
     donut = build_donut_chart(s.by_type, title="各任务类型 节省 Token 占比",
                               center_label="节省 Token", value_key="saved_tokens")
     insights, recs = s.insights, s.recommendations
@@ -491,8 +491,8 @@ def generate_html_report(s, *, use_online_search=False):
     rec_html = "".join(f"<li>{_esc(x)}</li>" for x in recs)
     caveat_html = "".join(f"<li>{_esc(c)}</li>" for c in s.caveats)
 
-    # Skill 推荐板块（v0.9.2 支持联网搜索）
-    skill_recs = recommend_skills(s.by_type, s.n, use_online_search=use_online_search)
+    # Skill 推荐板块（本地静态规则，无联网）
+    skill_recs = recommend_skills(s.by_type, s.n)
     skill_rec_html = format_recommendations_html(skill_recs)
 
     task_rows = ""
@@ -748,8 +748,6 @@ def main():
                         choices=["markdown", "html", "json"], help="输出格式")
     parser.add_argument("--summary", action="store_true",
                         help="输出一页摘要（对话式诊断首屏），而非完整报告")
-    parser.add_argument("--online", action="store_true",
-                        help="启用 SkillHub 联网搜索，获取最新 Skill 信息（Phase 2）")
     args = parser.parse_args()
 
     if not args.data_file:

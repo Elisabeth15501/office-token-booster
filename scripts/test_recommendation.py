@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""快速测试 Skill 推荐引擎"""
+"""快速测试 Skill 推荐引擎（v1.0.2 起：纯本地静态规则，联网分支已移除）"""
 import sys
 sys.path.insert(0, 'scripts')
 
@@ -12,32 +12,18 @@ by_type = [
 ]
 
 print("=" * 60)
-print("测试 1：基础推荐（离线模式）")
+print("测试 1：本地推荐（唯一模式，无联网）")
 print("=" * 60)
-recs = recommend_skills(by_type, total_tasks=8, use_online_search=False)
+recs = recommend_skills(by_type, total_tasks=8)
 print(f"找到 {len(recs)} 条推荐：")
 for r in recs:
     print(f"  🎯 {r.skill} ({r.priority})")
     print(f"     原因：{r.reason[:60]}...")
-    print(f"     安装：{r.install_cmd}")
+    print(f"     来源：{r.evidence_url}（未经验证）")
     print()
 
 print("=" * 60)
-print("测试 2：联网搜索推荐（Phase 2）")
-print("=" * 60)
-recs_online = recommend_skills(by_type, total_tasks=8, use_online_search=True)
-print(f"找到 {len(recs_online)} 条推荐：")
-for r in recs_online:
-    print(f"  🎯 {r.skill}")
-    if r.skillhub_info:
-        info = r.skillhub_info
-        print(f"     SkillHub: ⭐{info.get('stars', 0)} | {info.get('installs', 0)} 安装")
-        if info.get('description'):
-            print(f"     描述：{info['description'][:60]}...")
-    print()
-
-print("=" * 60)
-print("测试 3：Markdown 格式输出")
+print("测试 2：Markdown 格式输出")
 print("=" * 60)
 print(format_recommendations_md(recs[:1]))
 
