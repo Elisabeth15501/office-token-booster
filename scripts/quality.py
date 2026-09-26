@@ -88,7 +88,7 @@ _DROP_RE = re.compile(r"忽略\s*(\d+)\s*个单元格")
 
 
 def score_analysis(md: str) -> ScoreResult:
-    """数据分析：关键指标表存在 + 无隐藏丢行（复用 S3 披露行）。"""
+    """数据分析：关键指标表存在 + 无隐藏丢行（复用数据丢弃披露行）。"""
     checks = []
     has_table = "## 关键指标" in md
     checks.append(("关键指标表", has_table))

@@ -5,9 +5,9 @@
 长链路 Agent = 诊断内核（diagnose） + 建议生成（propose） + 写回动作（append）。
 本模块**只消费** `diagnose.py` 产出的 `Diagnosis` 对象，不 import `report_engine`、
 也不 import `qa`，因此对话式诊断（qa）+ 报告渲染（report_engine）一行代码都不用动 ——
-这正是 v0.1 三层解耦要换来的好处（见 README「演进路线」与产品发展计划时间线 ADR-7）。
+这正是三层解耦（内核 / 外壳分离）要换来的好处。
 
-能力（对应 README 的 v0.3 定义：采集任务 → 分析 → 给出省钱/提效建议 → 可选写回模板）：
+能力（采集任务 → 分析 → 给出省钱/提效建议 → 可选写回模板）：
 1. propose_entry(diag, task_type, ...)      —— 建议生成：把刚完成的任务变成一条账本草稿，
                                                用该类型历史均值预填 baseline 估计。
 2. propose_automation_targets(diag)         —— 建议生成：输出下一批「最该自动化」的任务类型。

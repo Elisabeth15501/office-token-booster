@@ -6,19 +6,19 @@
 
 设计原则：
 - 纯本地静态规则表（task_type → skill 映射），**无联网、无副作用**
+- 本技能不执行任何安装命令，仅提供第三方 Skill 的来源链接，由用户自行决定是否安装
 - 推荐的第三方 Skill 与节省数字引自其公开自述（README / benchmark），
   **未经本技能实测验证**，输出时明确标注，仅供参考
-- ⚠️ 安装是危险动作，本技能不代装：仅给出来源链接，由用户自行判断
 - 最多返回 3 个推荐，避免推荐过载
 """
 
 from __future__ import annotations
 
 import html as _html
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
-# P2 安全：所有进 HTML 的字段（含联网搜来的 skill 名/描述/标签）必须转义；
+# 安全：所有进 HTML 的字段（含来源链接文本）必须转义；
 # URL 仅允许 http/https，杜绝 javascript: 等协议注入。
 _esc = _html.escape
 
@@ -32,17 +32,20 @@ def _safe_url(u):
     return ""  # 非 http(s) 不渲染为链接，防 XSS
 
 
+# 优先级 → 展示样式（Markdown 与 HTML 共用一份，避免两处样式漂移）
+_PRIORITY_EMOJI = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟢"}
+_PRIORITY_COLOR = {"CRITICAL": "#dc2626", "HIGH": "#ea580c", "MEDIUM": "#16a34a"}
+
+
 @dataclass
 class SkillRecommendation:
     """一条 Skill 推荐记录。"""
 
-    skill: str                          # Skill 名称
-    reason: str                         # 推荐理由（自然语言）
-    install_cmd: str                    # 安装指引（本平台不开放自动安装，仅提供来源链接）
-    expected_saving: str                # 预期节省（来自 benchmark，标注来源）
-    priority: str = "MEDIUM"           # CRITICAL / HIGH / MEDIUM
+    skill: str                  # Skill 名称
+    reason: str                 # 推荐理由（自然语言）
+    expected_saving: str        # 预期节省（来自 benchmark，标注来源）
+    priority: str = "MEDIUM"    # CRITICAL / HIGH / MEDIUM
     evidence_url: Optional[str] = None  # 数据来源链接（可选，未经本技能验证）
-    requires_confirmation: bool = True  # 是否需用户确认才安装（当前仅作展示，不执行任何命令）
 
 
 # ─────────────────────────────────────────────────────────────
@@ -56,7 +59,6 @@ _TASK_TYPE_RULES = [
         "skill": SkillRecommendation(
             skill="ponytail",
             reason="你的'{task_type}'任务消耗较高，Ponytail 通过 YAGNI 决策阶梯强制最少代码，实测减 22% Token / 20% 成本",
-            install_cmd="请访问数据来源页面按官方说明手动安装",
             expected_saving="-22% Token (Ponytail agentic benchmark, 12 tasks, Haiku 4.5)",
             priority="HIGH",
             evidence_url="https://github.com/DietrichGebert/ponytail",
@@ -67,7 +69,6 @@ _TASK_TYPE_RULES = [
         "skill": SkillRecommendation(
             skill="caveman",
             reason="你的'{task_type}'任务消耗较高，Caveman 让 AI 用精简语言回复，输出侧平均减 65% Token",
-            install_cmd="请访问数据来源页面按官方说明手动安装",
             expected_saving="-65% output tokens (Caveman README, 10-task benchmark)",
             priority="HIGH",
             evidence_url="https://github.com/JuliusBrussee/caveman",
@@ -77,7 +78,6 @@ _TASK_TYPE_RULES = [
         "keywords": ["终端", "日志", "编译", "测试", "git", "命令行", "CLI", "构建"],
         "skill": "rtk",
         "reason_template": "你的'{task_type}'任务涉及终端输出，RTK 过滤 CLI 噪声，实测平均减 89% 无效 Token",
-        "install_cmd": "请访问数据来源页面按官方说明手动安装",
         "expected_saving": "-89% CLI noise (RTK benchmark, 2,900+ commands)",
         "priority": "MEDIUM",
         "evidence_url": "https://github.com/rtk-ai/rtk",
@@ -87,7 +87,6 @@ _TASK_TYPE_RULES = [
         "skill": SkillRecommendation(
             skill="token-diet",
             reason="你的'{task_type}'任务消耗较高，token-diet 六维治理综合优化，平均减 31% 账单",
-            install_cmd="请访问数据来源页面按官方说明手动安装",
             expected_saving="-31% bill on average (token-diet Sonnet 5 benchmark)",
             priority="MEDIUM",
             evidence_url="https://github.com/Kulaxyz/token-diet",
@@ -103,7 +102,6 @@ _GLOBAL_RULES = [
         "skill": SkillRecommendation(
             skill="token-diet",
             reason="本周总消耗较高，token-diet 六维治理综合优化，平均减 31% 账单",
-            install_cmd="请访问数据来源页面按官方说明手动安装",
             expected_saving="-31% bill on average (token-diet Sonnet 5 benchmark)",
             priority="CRITICAL",
             evidence_url="https://github.com/Kulaxyz/token-diet",
@@ -115,7 +113,6 @@ _GLOBAL_RULES = [
         "skill": SkillRecommendation(
             skill="caveman",
             reason="本周任务频繁，Caveman 让 AI 精简回复，累计节省可观",
-            install_cmd="请访问数据来源页面按官方说明手动安装",
             expected_saving="-65% output tokens (Caveman README)",
             priority="MEDIUM",
             evidence_url="https://github.com/JuliusBrussee/caveman",
@@ -156,11 +153,9 @@ def recommend_skills(
                     rec = SkillRecommendation(
                         skill=rec.skill,
                         reason=final_reason,
-                        install_cmd=rec.install_cmd,
                         expected_saving=rec.expected_saving,
                         priority=rec.priority,
                         evidence_url=rec.evidence_url,
-                        requires_confirmation=True,
                     )
                 elif isinstance(rec, str):
                     # 兼容旧格式（字符串 skill 名 + 单独字段）
@@ -170,11 +165,9 @@ def recommend_skills(
                         reason=rule_data.get("reason_template", f"你的'{task_type}'任务适合 {rec}").format(
                             task_type=task_type
                         ),
-                        install_cmd=rule_data["install_cmd"],
                         expected_saving=rule_data["expected_saving"],
                         priority=rule_data.get("priority", "MEDIUM"),
                         evidence_url=rule_data.get("evidence_url"),
-                        requires_confirmation=True,
                     )
                 # 去重：只保留第一个匹配（最高优先级）
                 if rec.skill not in recommendations:
@@ -186,7 +179,6 @@ def recommend_skills(
         if "threshold_tasks" in rule and total_tasks >= rule["threshold_tasks"]:
             rec = rule["skill"]
             if rec.skill not in recommendations:
-                rec.requires_confirmation = True
                 recommendations[rec.skill] = rec
 
     # 3. 排序：CRITICAL > HIGH > MEDIUM
@@ -203,8 +195,9 @@ def recommend_skills(
 
 def format_recommendation_md(rec: SkillRecommendation) -> str:
     """将单条推荐格式化为 Markdown。"""
+    emoji = _PRIORITY_EMOJI.get(rec.priority, "⚪")
     lines = [
-        f"### 🎯 推荐：{rec.skill}",
+        f"### {emoji} 推荐：{rec.skill}",
         "",
         f"- **原因**：{rec.reason}",
         f"- **预期节省**：{rec.expected_saving}（引自第三方项目自述，未经本技能实测验证，仅供参考）",
@@ -217,12 +210,17 @@ def format_recommendation_md(rec: SkillRecommendation) -> str:
     return "\n".join(lines)
 
 
-def format_recommendations_md(recommendations: list[SkillRecommendation]) -> str:
-    """将推荐列表格式化为 Markdown 板块。"""
-    if not recommendations:
-        return "## 推荐 Skill\n\n暂无匹配推荐。当你有更多任务数据后，系统会智能推荐合适的省 Token Skill。\n"
+def format_recommendations_md(recommendations: list[SkillRecommendation],
+                              heading: str = "## 推荐 Skill") -> str:
+    """将推荐列表格式化为 Markdown 板块。
 
-    lines = ["## 推荐 Skill\n",
+    heading: 板块标题。完整报告用编号标题（如「## 九、推荐 Skill」），
+    一页摘要用无编号的默认标题 —— 两处共用本函数以免渲染逻辑重复。
+    """
+    if not recommendations:
+        return f"{heading}\n\n暂无匹配推荐。当你有更多任务数据后，系统会智能推荐合适的省 Token Skill。\n"
+
+    lines = [heading + "\n",
              "> 基于你的任务类型和消耗量，推荐以下 Skill 来降低 Token 成本。\n"
              "> ⚠️ 推荐来自本地静态规则，节省数字引自第三方项目自述，**未经本技能实测验证**，仅供参考：\n"]
     for rec in recommendations:
@@ -240,8 +238,8 @@ def format_recommendations_html(recommendations: list[SkillRecommendation]) -> s
 
     cards = []
     for rec in recommendations:
-        priority_emoji = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟢"}.get(rec.priority, "⚪")
-        priority_color = '#dc2626' if rec.priority == 'CRITICAL' else '#ea580c' if rec.priority == 'HIGH' else '#16a34a'
+        priority_emoji = _PRIORITY_EMOJI.get(rec.priority, "⚪")
+        priority_color = _PRIORITY_COLOR.get(rec.priority, "#6b7280")
 
         card = f"""
     <div class="rec-card" style="border-left: 4px solid {priority_color}; margin: 12px 0; padding: 14px; background: #f9fafb; border-radius: 8px;">

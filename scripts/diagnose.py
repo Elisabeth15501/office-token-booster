@@ -8,7 +8,7 @@
 这是「对话式诊断」与「长链路 Agent」两个外壳共享的内核：
 - 对话式诊断 = 内核 + 交互 Q&A 外壳（只读、响应式）
 - 长链路 Agent = 内核 + 建议生成 + 写回动作（主动管道）
-两者都只消费 Diagnosis 对象，互不耦合（见产品发展计划时间线 ADR-7 / 双产品线解耦）。
+两者都只消费 Diagnosis 对象，互不耦合（内核与两个外壳解耦，便于各自独立演进）。
 
 设计原则（与 agent-analytics-report 报告引擎一脉相承，但完全解耦）：
 - 纯标准库，无第三方依赖、无网络、无硬编码密钥
@@ -31,8 +31,15 @@ from pathlib import Path
 METHODOLOGY_NOTE = (
     "方法论说明：本报告的「节省值」= 你填写的基准估计（不使用本技能、自己手搓 / 反复试错的成本）"
     "− 本技能实际消耗，均为你的主观参照估计，非平台用量实测扣费。本技能不调用任何外部 API "
-    "测量 Token，仅读取你主动提供的账本文件（本地处理、零上传，符合 ADR-9）。"
+    "测量 Token，仅读取你主动提供的账本文件（本地处理、零上传）。"
 )
+
+
+# 数据可信度判定阈值（集中命名，避免散落魔法数；语义见 _build_caveats）。
+_OUTLIER_BASELINE_MULTIPLE = 3       # 单条基准 > 中位数 N 倍视为异常偏高
+_OVERALL_SAVE_RATE_ALERT = 85.0      # 整体节省率 > N% 提示复核基准是否保守
+_HIGH_SAVE_RATE = 50.0               # 整体节省 ≥ N% 视为显著提效
+_LOW_SAVE_RATE = 20.0                # 整体节省 < N% 提示基线可能偏高
 
 
 def format_number(n):
@@ -101,7 +108,7 @@ def load_ledger(path):
 
 
 # ─────────────────────────────────────────────────────────────
-# v0.8 提效洞察：周期对比 + 自动化 ROI 评分（纯函数，内核单一事实源）
+# 提效洞察：周期对比 + 自动化 ROI 评分（纯函数，内核单一事实源）
 # ─────────────────────────────────────────────────────────────
 
 def compute_period_compare(by_week):
@@ -309,15 +316,15 @@ def build_insights(s):
             f"自动化空间最大。"
         )
 
-    if s["token_save_pct"] >= 50:
-        insights.append("整体提效显著（Token 节省 ≥ 50%），技能化已明显见效。")
-    elif s["token_save_pct"] < 20 and s["n"] >= 3:
+    if s["token_save_pct"] >= _HIGH_SAVE_RATE:
+        insights.append(f"整体提效显著（Token 节省 ≥ {_HIGH_SAVE_RATE:.0f}%），技能化已明显见效。")
+    elif s["token_save_pct"] < _LOW_SAVE_RATE and s["n"] >= 3:
         insights.append("Token 节省偏低，可能部分任务本身已较精简，或基线估计偏高。")
         recs.append("回顾基线估计是否合理：基线应是「自己手搓 / 反复试错」的真实成本。")
 
     recs.append("保持「本地处理、不上传内容」的合规优势，作为对外可演示的差异化卖点。")
 
-    # v0.8：自动化 ROI 优先序（消费内核已算好的 roi_targets）
+    # 自动化 ROI 优先序（消费内核已算好的 roi_targets）
     if s.get("roi_targets"):
         top_roi = s["roi_targets"][0]
         recs.append(
@@ -365,7 +372,7 @@ def detect_baseline_anomalies(tasks):
                 bt = t.get("baseline_tokens", 0) or 0
                 ty = t.get("type", "其他")
                 date = t.get("date", "")
-                if bt > 3 * med:
+                if bt > _OUTLIER_BASELINE_MULTIPLE * med:
                     caveats.append(
                         f"任务「{ty} @ {date}」基准 Token（{format_number(bt)}）显著高于整体中位数"
                         f"（{format_number(med)}），估计可能偏高，拉高了整体节省率。"
@@ -377,7 +384,7 @@ def detect_baseline_anomalies(tasks):
     total_skill = sum(t.get("skill_tokens", 0) or 0 for t in tasks)
     if total_base > 0:
         overall_pct = (total_base - total_skill) / total_base * 100
-        if overall_pct > 85:
+        if overall_pct > _OVERALL_SAVE_RATE_ALERT:
             sample_note = "（样本较少时尤其需复核）" if len(tasks) <= 3 else ""
             caveats.append(
                 f"整体 Token 节省率高达 {overall_pct:.1f}%{sample_note}，"
@@ -413,7 +420,7 @@ class Diagnosis:
     methodology: str = METHODOLOGY_NOTE
     tasks: list = field(default_factory=list)
     generated_at: str = ""
-    # 不降质量护栏（v0.9.11）：整体质量分均值与可信判定
+    # 不降质量护栏：整体质量分均值与可信判定
     avg_quality: int = 0
     has_quality: bool = False
     quality_floor: int = QUALITY_FLOOR

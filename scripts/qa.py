@@ -40,7 +40,7 @@ def _consume_most_type(diag):
 
     与「节省最多」(_top_type) 严格区分：消耗 = 你为这类任务实际花掉的 Token，
     节省 = 基准 − 实耗的差额。追问里的「消耗最多」必须锚定 skill_tokens，
-    不能落到 saved_tokens 分支（历史语义坑：'最多' 关键词曾错误路由到节省）。
+    不能落到 saved_tokens 分支（否则「最多」会错误路由到节省口径）。
     """
     return max(diag.by_type, key=lambda x: x["skill_tokens"]) if diag.by_type else None
 
@@ -137,7 +137,8 @@ def answer_followup(diag, question):
         return (f"Token 节省比例 {diag.token_save_pct:.1f}%，"
                 f"时间节省比例 {diag.time_save_pct:.1f}%。")
 
-    # 哪个类型「消耗」Token 最多（实耗，而非节省）—— 须置于「节省最多」分支之前。
+    # 哪个类型「消耗」Token 最多（实耗，而非节省）—— 须置于「节省最多」分支之前，
+    # 否则「消耗最多」会被下方「最多」关键词误判为节省口径。
     # 关键词命中「消耗/用量/占用/实耗/花掉/用了多少/花了多少/用掉/用得最多/最费/费token/费钱/耗费最多」即视为「消耗」意图，
     # 但同期若显式问「省/节省」，则交给下方「节省最多」分支处理（避免误判）。
     if any(k in q for k in ("消耗", "用量", "占用", "实耗", "花掉", "用了多少", "花了多少", "用掉", "用得最多", "最费", "费token", "费钱", "耗费最多")):
@@ -151,7 +152,7 @@ def answer_followup(diag, question):
                 )
             return "暂无可统计的任务类型。"
 
-    # 哪个类型节省最多（含「最省 / 省最多 / 最划算」等口语说法，避免落到通用帮助，Issue #2）
+    # 哪个类型节省最多（含「最省 / 省最多 / 最划算」等口语说法，避免落到通用帮助）
     if any(k in q for k in ("最多", "最高", "主力", "第一", "最大", "top", "Top", "最省", "省最多", "省得最多", "最划算")):
         top = _top_type(diag)
         if top:
@@ -168,7 +169,7 @@ def answer_followup(diag, question):
                     f"自动化空间最大。")
         return "暂无可分析的任务类型。"
 
-    # 本期 vs 上期（v0.8 提效洞察）
+    # 本期 vs 上期（周期对比洞察）
     if any(k in q for k in ("本期", "上期", "比上周", "相比上周", "和上周比", "这周比", "环比")):
         pc = diag.period_compare
         if not pc:

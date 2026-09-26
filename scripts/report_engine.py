@@ -28,9 +28,9 @@ Token 与耗时，生成 Markdown / HTML / JSON 报告。
 
 # ---------------------------------------------------------------------------
 # FORK NOTE (office-token-booster / B 线):
-# 本文件从 agent-analytics-report/scripts/generate_report.py fork 而来（ADR-7 双产品线独立）。
+# 本文件从 agent-analytics-report/scripts/generate_report.py fork 而来，作为独立产品线维护。
 # 已剥离宿主数据源耦合：移除 collect_usage_data 运行时导入与 main() 实时采集分支，
-# 中性化 pricing.json 引用（ADR-9：B 线默认走「用户上传/导出数据」模式，不依赖天禧/宿主 用量 API）。
+# 中性化 pricing.json 引用（B 线默认走「用户上传/导出数据」模式，不依赖天禧/宿主用量 API）。
 # 下方报告函数已适配 office ledger 数据（消费 token/耗时/任务类型），作为 B 线唯一报告生成器。
 # 通用渲染原语（format_number / _pad_label / build_donut_chart 等）沿用 A 引擎。
 # ---------------------------------------------------------------------------
@@ -46,7 +46,7 @@ from diagnose import format_number, load_ledger, diagnose, Diagnosis, _safe_div
 import html as _html
 # P2 安全：所有进 HTML 的用户字段必须经此转义，杜绝 <script> 等注入。
 _esc = _html.escape
-from skill_recommender import recommend_skills, format_recommendations_html
+from skill_recommender import recommend_skills, format_recommendations_md, format_recommendations_html
 
 
 # ─────────────────────────────────────────────────────────────
@@ -280,7 +280,7 @@ def generate_markdown_report(s):
     L.append(f"- **节省时间**：{format_number(s.saved_min)} 分钟（基准 {format_number(s.total_base_min)} → 本技能 {format_number(s.total_skill_min)}），节省 **{s.time_save_pct:.1f}%**")
     L.append("")
 
-    # 本期 vs 上期（v0.8 提效洞察）
+    # 本期 vs 上期（周期对比洞察）
     if s.period_compare:
         pc = s.period_compare
         arrow = {"up": "▲", "down": "▼", "flat": "▬", "new": "✦"}.get(pc["direction"], "")
@@ -367,22 +367,11 @@ def generate_markdown_report(s):
         L.append(f"- {x}")
     L.append("")
 
-    # 九、推荐 Skill（本地静态规则，无联网）
-    recs = recommend_skills(s.by_type, s.n)
-    if recs:
-        L.append("## 九、推荐 Skill")
-        L.append("")
-        L.append("> 基于你的任务类型和消耗量，推荐以下 Skill 来降低 Token 成本：\n")
-        for rec in recs:
-            priority_emoji = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟢"}.get(rec.priority, "⚪")
-            L.append(f"### {priority_emoji} 推荐：{rec.skill}")
-            L.append("")
-            L.append(f"- **原因**：{rec.reason}")
-            L.append(f"- **预期节省**：{rec.expected_saving}")
-            L.append(f"- **安装命令**：`{rec.install_cmd}`")
-            if rec.evidence_url:
-                L.append(f"- **数据来源**：{rec.evidence_url}")
-            L.append("")
+    # 推荐 Skill（本地静态规则，无联网）：集中渲染，含「未经实测验证」披露
+    # 完整报告的段落有编号，故传入「九、」标题；摘要用默认无编号标题。
+    skill_recs = recommend_skills(s.by_type, s.n)
+    if skill_recs:
+        L.append(format_recommendations_md(skill_recs, heading="## 九、推荐 Skill"))
 
     # 十一、下周展望
     L.append("## 十一、下周展望")
@@ -392,13 +381,13 @@ def generate_markdown_report(s):
     L.append("- 若参加「天禧 AI Skills 苍穹共创计划」，本报告的「本地处理、零上传」可作为合规卖点。")
     L.append("")
 
-    # 质量护栏（不降质量，v0.9.11 新增）
+    # 质量护栏（不降质量）
     L.append("## 十二、质量护栏（不降质量）")
     L.append("")
     L.append(_quality_guard_md(s))
     L.append("")
 
-    # 数据可信度提示（baseline 护栏，v0.2 新增）
+    # 数据可信度提示（baseline 护栏）
     if s.caveats:
         L.append("## 十三、数据可信度提示")
         L.append("")
@@ -599,7 +588,7 @@ def generate_json_report(s):
 
 
 # ─────────────────────────────────────────────────────────────
-# 一页摘要（对话式诊断首屏，v0.2 新增）
+# 一页摘要（对话式诊断首屏）
 # 区别于九段完整报告：只给核心数字 + 提效主力 + 一句话结论 + 数据可信度 + 方法论，
 # 作为「先出摘要 + 图表，再支持追问」流程的第一屏。
 # ─────────────────────────────────────────────────────────────
@@ -644,17 +633,10 @@ def generate_markdown_summary(s):
     L.append("")
     L.append(_quality_guard_md(s))
 
-    # Skill 推荐（v0.9.1 新增）
+    # 推荐 Skill（本地静态规则，无联网）：集中渲染，含「未经实测验证」披露
     skill_recs = recommend_skills(s.by_type, s.n)
     if skill_recs:
-        L.append("## 推荐 Skill")
-        L.append("")
-        for rec in skill_recs:
-            L.append(f"### 🎯 {rec.skill}")
-            L.append(f"- **原因**：{rec.reason}")
-            L.append(f"- **预期节省**：{rec.expected_saving}")
-            L.append(f"- **安装**：`{rec.install_cmd}`")
-            L.append("")
+        L.append(format_recommendations_md(skill_recs))
 
     L.append("---")
     L.append(f"*{s.methodology}*")
@@ -673,7 +655,7 @@ def generate_html_summary(s):
     trend_chart = build_trend_line_chart(s.by_week)
     compare_card = build_compare_card(s.period_compare)
     roi_card = build_roi_card(s.roi_targets)
-    # Skill 推荐（v0.9.1 新增）
+    # Skill 推荐（本地静态规则，无联网）
     skill_recs = recommend_skills(s.by_type, s.n)
     skill_rec_html = format_recommendations_html(skill_recs)
 
@@ -741,7 +723,7 @@ def generate_html_summary(s):
 
 def main():
     parser = argparse.ArgumentParser(description="办公室提效账本报告生成器（office-token-booster）")
-    parser.add_argument("data_file", nargs="?", help="账本 JSON 路径（未提供则尝试读取当前目录 ledger.json；B 线仅支持用户上传/导出的数据文件，ADR-9）")
+    parser.add_argument("data_file", nargs="?", help="账本 JSON 路径（未提供则尝试读取当前目录 ledger.json；B 线仅支持用户上传/导出的数据文件）")
     parser.add_argument("--ledger", dest="data_file", help="账本 JSON 路径（同 data_file）")
     parser.add_argument("--output", "-o", type=str, help="输出文件路径")
     parser.add_argument("--format", type=str, default="markdown",
@@ -755,7 +737,7 @@ def main():
         if _default_ledger.is_file():
             args.data_file = str(_default_ledger)
     if not args.data_file:
-        print("[错误] B 线（office-token-booster）仅支持读取用户上传/导出的数据文件（ADR-9），"
+        print("[错误] B 线（office-token-booster）仅支持读取用户上传/导出的数据文件，"
               "不实时采集宿主用量。用法: python report_engine.py <ledger.json> [--format markdown|html|json]",
               file=sys.stderr)
         return 2

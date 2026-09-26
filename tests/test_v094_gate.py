@@ -126,7 +126,6 @@ def test_p2_skill_recommendation_escape_and_url_scheme():
     rec = SkillRecommendation(
         skill="<img src=x onerror=alert(1)>",
         reason="正常理由",
-        install_cmd="skillhub install foo",
         expected_saving="省 10%",
         priority="HIGH",
         evidence_url="javascript:alert(1)",  # 危险协议

@@ -93,7 +93,6 @@ class TestRecommendSkills:
         rec = recs[0]
         assert rec.skill
         assert rec.reason
-        assert rec.install_cmd
         assert rec.expected_saving
         assert rec.priority in ["CRITICAL", "HIGH", "MEDIUM"]
 
@@ -107,7 +106,6 @@ class TestFormatRecommendations:
             SkillRecommendation(
                 skill="ponytail",
                 reason="测试原因",
-                install_cmd="clawhub install ponytail",
                 expected_saving="-22% Token",
                 priority="HIGH",
                 evidence_url="https://github.com/DietrichGebert/ponytail",
@@ -126,7 +124,6 @@ class TestFormatRecommendations:
             SkillRecommendation(
                 skill="caveman",
                 reason="测试原因",
-                install_cmd="npx skills add JuliusBrussee/caveman",
                 expected_saving="-65%",
                 priority="HIGH",
             )

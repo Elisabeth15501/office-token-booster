@@ -40,7 +40,7 @@ from ledger_agent import (                                         # noqa: E402
 from report_engine import (                                        # noqa: E402
     generate_markdown_summary, generate_markdown_report)
 from type_registry import load_registry                            # noqa: E402  # 类型字典单一事实源（与 executor 共用）
-from executor import (  # noqa: E402  # Phase 3：execute 意图路由复用执行引擎
+from executor import (  # noqa: E402  # execute 意图路由复用执行引擎
     resolve_exec_type as _resolve_exec_type,
     EXECUTORS as _EXECUTORS,
     execute_render as _exec_render,

@@ -30,6 +30,13 @@ from quality import score_deliverable  # noqa: E402  # 不降质量护栏：渲�
 
 _logger = logging.getLogger(__name__)
 
+
+def _engine_footer(note=None):
+    """报告页脚：标注由本执行引擎生成；可选追加一句提示（note）。"""
+    base = "由 office-token-booster 执行引擎生成"
+    return f"> {base}。" if not note else f"> {base}；{note}。"
+
+
 # ---------------------------------------------------------------------------
 # 任务类型归一（复用类型字典；缺失则退化为直匹配）
 # ---------------------------------------------------------------------------
@@ -112,7 +119,7 @@ def resolve_exec_type(task_type: str) -> Optional[str]:
 # 一处剥离覆盖全部走 [f"- {x}" for x in ...] 的渲染器（周报/纪要/PPT/要点提炼）。
 _RE_BULLET = re.compile(r"^\s*(?:[-*+•·]|\d+[.)、])\s+")
 
-# 完成类动词：命中即视为「陈述已完成的工作」，不应被风险关键词抢走（Issue #1）。
+# 完成类动词：命中即视为「陈述已完成的工作」，不应被风险关键词抢走。
 _RE_DONE_VERB = re.compile(r"发现|定位|修复|完成|已|上线|提交|解决|搞定|处理", re.I)
 
 
@@ -146,14 +153,14 @@ def _detect_date_range(text: str) -> str:
 # ---------------------------------------------------------------------------
 # 模块 1：周报生成
 # ---------------------------------------------------------------------------
-# 周报行内锚点前缀（S7：提到模块级预编译，避免每次渲染都重建正则）。
+# 周报行内锚点前缀：预编译为模块级正则，避免每次渲染重复编译。
 # 每项 (编译好的正则, 桶名)；桶名在 render_weekly_report 内映射到对应 list。
 _WEEKLY_ANCHOR_PATTERNS = [
     (re.compile(r"^\s*(风险|阻塞|卡点|问题|blocker|issue)\s*[:：]?", re.I), "risk"),
     (re.compile(r"^\s*(下周计划|下週计划|下周|下週|计划|规划|plan|todo|后续|待办)\s*[:：]?", re.I), "plan"),
     (re.compile(r"^\s*(本周概览|本周|概览|摘要|总览|summary|overview)\s*[:：]?", re.I), "overview"),
 ]
-# 无显式前缀时的兜底关键词（同样预编译 —— S7）。
+# 无显式前缀时的兜底关键词，均预编译为模块级正则。
 _RE_WEEKLY_PLAN_KW = re.compile(r"下周|下週|计划|规划|plan|todo|后续|待办", re.I)
 _RE_WEEKLY_RISK_KW = re.compile(r"风险|阻塞|卡点|问题|卡住|blocker|issue|待解决", re.I)
 _RE_WEEKLY_OVERVIEW_KW = re.compile(r"概览|摘要|本周|总览|summary|overview", re.I)
@@ -166,9 +173,9 @@ def render_weekly_report(text: str) -> str:
     overview, work, plan, risk = [], [], [], []
 
     # 行内锚点前缀：一行内混合多个要点时（如「风险：x；下周：y」），按前缀正确路由，
-    # 避免整行被「下周」等关键词抢走而丢失「风险」段（E3 增强）。
+    # 避免整行被「下周」等关键词抢走而丢失「风险」段。
     # 长标签优先（如「本周概览」「下周计划」），保证去前缀更干净。
-    # 锚点正则与兜底关键词均已提到模块级（S7，不再每次重建）。
+    # 锚点正则与兜底关键词均已提到模块级，避免每次渲染重复编译。
     def classify(sub: str):
         s = sub.strip()
         if not s:
@@ -178,9 +185,9 @@ def render_weekly_report(text: str) -> str:
             if pat.match(s):
                 content = pat.sub("", s).strip() or s
                 return name, content
-        # 2) 无显式前缀时，按关键词兜底（与旧逻辑一致，关键词已预编译 —— S7）
+        # 2) 无显式前缀时，按关键词兜底（关键词已预编译）。
         #    风险判定加语义门槛：仅当行内「无完成类动词」时才判为风险，
-        #    避免「发现问题 / 解决问题」这类中性句被「问题/issue」抢进风险节（Issue #1）。
+        #    避免「发现问题 / 解决问题」这类中性句被「问题/issue」抢进风险节。
         #    显式锚点（风险：…）仍优先，不在此门槛约束内。
         if _RE_WEEKLY_PLAN_KW.search(s):
             return "plan", s
@@ -192,7 +199,7 @@ def render_weekly_report(text: str) -> str:
 
     _buckets = {"risk": risk, "plan": plan, "overview": overview, "work": work}
     for ln in lines:
-        # 一行内多个要点用 ；/ ; 分隔时，拆开分别归类（E3 增强核心）
+        # 一行内多个要点用 ；/ ; 分隔时，拆开分别归类
         for sub in _RE_SPLIT_SEMICOLON.split(ln):
             r = classify(sub)
             if r is None:
@@ -209,7 +216,7 @@ def render_weekly_report(text: str) -> str:
         out += ["## 风险与阻塞", ""] + [f"- {x}" for x in risk] + [""]
     out += ["## 下周计划", ""]
     out += [f"- {x}" for x in (plan or ["（待补充）"])] + [""]
-    out.append("> 由 office-token-booster 执行引擎生成；节省值请在确认写回账本时补充「笨办法」基准。")
+    out.append(_engine_footer("节省值请在确认写回账本时补充「笨办法」基准"))
     return "\n".join(out)
 
 
@@ -257,7 +264,7 @@ def render_meeting_minutes(text: str) -> str:
     out += [f"- {x}" for x in (open_iss or ["（无）"])] + [""]
     if discuss and not attendee:
         out += ["## 其他讨论", ""] + [f"- {x}" for x in discuss] + [""]
-    out.append("> 由 office-token-booster 执行引擎生成。")
+    out.append(_engine_footer())
     return "\n".join(out)
 
 
@@ -294,9 +301,8 @@ def analyze_csv(text_or_path: str) -> str:
     n_cols = len(header)
     n_rows = len(rows)
     col_stats: list[str] = []
-    # S3：静默丢弃计数（ragged 行缺列 / 空单元格 / 数值列里的非数字）。
-    # 旧实现直接忽略这些单元格、不告知用户，导致「看到的统计」可能基于不完整数据。
-    # 现显式累计并在报告末尾披露，让用户「看清」数据损失（对齐北极星：看清成本）。
+    # 静默丢弃计数（ragged 行缺列 / 空单元格 / 数值列里的非数字）。
+    # 这些单元格不应悄悄丢失：显式累计并在报告末尾披露，让用户「看清」数据损失。
     dropped_ragged = 0
     dropped_empty = 0
     dropped_nonnum = 0
@@ -332,7 +338,7 @@ def analyze_csv(text_or_path: str) -> str:
 
     out += ["## 关键指标", "", "| 字段 | 类型 | 非空数 | 求和 | 均值 | 最小 | 最大 | 中位数/Top |", "|---|---|---|---|---|---|---|---|"]
     out += col_stats
-    # S3：披露数据丢弃情况，便于核对「看到的统计」是否基于完整数据。
+    # 披露数据丢弃情况，便于核对「看到的统计」是否基于完整数据。
     dropped_total = dropped_ragged + dropped_empty + dropped_nonnum
     if dropped_total:
         parts = []
@@ -374,7 +380,7 @@ def summarize_doc(text: str) -> str:
     out += ["## 文档大纲", ""] + [f"- {x}" for x in outline] + [""]
     out += ["## 核心要点", ""] + [f"- {x}" for x in points] + [""]
     out += ["## 一句话总结", "", one_liner, ""]
-    out.append("> 由 office-token-booster 执行引擎生成。")
+    out.append(_engine_footer())
     return "\n".join(out)
 
 
@@ -395,7 +401,7 @@ def render_ppt_outline(text: str) -> str:
             out.append(f"- {b}")
     out += ["", "## Slide 4 · 数据 / 案例", "- （补充：支撑数据或案例）"]
     out += ["", "## Slide 5 · 总结与行动号召", "- （补充：观众下一步做什么）", ""]
-    out.append("> 由 office-token-booster 执行引擎生成；送去排版类 Skill 可直出 PPT。")
+    out.append(_engine_footer("送去排版类 Skill 可直出 PPT"))
     return "\n".join(out)
 
 
@@ -465,7 +471,7 @@ def propose_ledger(ledger_path: str, task_type: str,
     """执行完后把这笔账记回 ledger。
 
     cost 为宿主完成事件的用量字典 {"skill_tokens": N, "skill_minutes": M}
-    （复用 v0.7 build_completion_event 形态）；显式传入的 skill_tokens/
+    （复用宿主完成事件 cost 形态）；显式传入的 skill_tokens/
     skill_minutes 优先于 cost 字典。
     baseline_tokens / baseline_minutes 为用户「笨办法」手搓基准，显式传入可绕过
     P0 护栏直接写回（空账本上不传 baseline 会被护栏拦截，避免负节省污染账本）。
@@ -740,7 +746,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--init-ledger", help="创建空账本文件（写入 {\"tasks\":[]}），用于首次记账前初始化；指定后无需 --type")
     args = ap.parse_args(argv)
 
-    # D1：一等「创建空账本」命令，替代脆弱的 echo / python -c（Test 2/3 根因）
+    # 一等「创建空账本」命令：替代脆弱的 echo / python -c 手写初始化（易写错 JSON）。
     if args.init_ledger:
         p = Path(args.init_ledger)
         if p.exists():
@@ -808,7 +814,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 note=args.note or f"执行引擎：{std_type}", apply=args.confirm_ledger,
             )
         except FileNotFoundError:
-            # E4：账本文件不存在时给出友好提示（而非原始栈），交付物已正常生成，仅跳过记账
+            # 账本文件不存在时给出友好提示（而非原始栈）：交付物已正常生成，仅跳过记账。
             print(f"[错误] 记账账本文件不存在：{args.apply_ledger}", file=sys.stderr)
             print("       请先创建空账本后再记账：", file=sys.stderr)
             print(f"       .venv\\Scripts\\python scripts\\executor.py --init-ledger {args.apply_ledger}", file=sys.stderr)
