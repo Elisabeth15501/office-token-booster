@@ -4,6 +4,36 @@
 
 ---
 
+## v1.0.3 — 代码质量整改（clean-code 审计红/黄项清零）（2026-09-28）
+
+纯重构，**对外行为等价**：CLI 参数、报告结构、问句应答、输出格式全部不变。
+（本版另需一个版本号：天禧 AI 平台要求上传版本号严格大于已登记版本，同版本不允许覆盖。）
+
+### 修复
+
+- **`report_engine` 潜在崩溃**：两处内联推荐渲染仍在读取已删除的 `rec.install_cmd`（会抛 `AttributeError`）。统一改走 `format_recommendations_md()`，并保留「九、」编号标题与 🔴/🟠/🟢 优先级标识（与 HTML 口径一致）。
+- **`skill_recommender` 不可达死规则**：`_GLOBAL_RULES` 中按金额触发的规则声明了 `threshold_cost` 与 `condition`，但代码只判断 `threshold_tasks` —— 该 CRITICAL 规则永不触发，`condition` 字符串从未被求值。已删除（账本无成本字段，按金额触发属新功能而非清理）。一并删除 `install_cmd` / `requires_confirmation` 死字段。
+
+### 重构（无行为变化）
+
+- **长函数拆分**：`qa.answer_followup` 改为表驱动（17 组关键词常量 + 路由表，162 → 19 行）；`diagnose.compute_summary` 抽聚合 helper（95 → 45 行）；`executor.main` 拆子命令（105 → 44 行）；`recommend_skills` 拆两个 matcher（64 → 26 行）。
+- **消除重复**：`diagnose` 两段近似聚合循环合并为 `_group_sum` + `_with_saved`；`executor` 4 处引擎页脚抽取为 `_engine_footer()`。
+- **魔法数常量化**：`qa` 内联关键词 → `_KW_*` 命名常量；`diagnose` 阈值 → 命名常量，且提示文案改为插值常量（防改常量后文案漂移）。
+- **注释清理**：5 个核心模块 + 7 个外围模块共 **35+ 处** `S7/E3/S3/D1/E4/Issue #n/ADR-7/ADR-9/Phase N/v0.x` 工单式与版本号注释，改写为「为什么这样做」。
+
+### 其他
+
+- 删除失效脚本 `test_clawhub.py` 与 `test_phase2.py`（调用已移除的联网参数，早已无法运行）。
+- 移除测试中对该死字段的构造与断言。
+
+### 验证
+
+- 全量 **186 passed, 3 skipped**（与整改前基线一致）。
+- `qa` 模块 **54 组问句新旧输出逐句等价性比对，0 diff**（动了 15 个顺序敏感分支，单测不足以覆盖，从 git HEAD 取出旧模块对拍）。
+- `security_preflight scripts` EXIT=0；`executor` CLI 五条路径冒烟全通。
+
+---
+
 ## v1.0.2 — 修复 3 个 GitHub Issue + 移除冗余的安装确认 UI（2026-09-24）
 
 千问办公实跑与 Issue 反馈驱动的修复补丁，未改任何对外能力边界。
