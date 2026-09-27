@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""ledger_agent.py — office-token-booster 长链路 Agent（B 线 v0.3）
+"""ledger_agent.py — office-token-booster 长链路 Agent（B 线）
 
 长链路 Agent = 诊断内核（diagnose） + 建议生成（propose） + 写回动作（append）。
 本模块**只消费** `diagnose.py` 产出的 `Diagnosis` 对象，不 import `report_engine`、
@@ -222,7 +222,7 @@ def append_entries(ledger_path, entries, *, backup=True, dry_run=False):
 def import_host_usage(ledger_path, days=7, provider=None, *,
                       baseline_tokens=0, baseline_minutes=0, apply=False,
                       baseline_ratio=None):
-    """v0.9：把宿主真实用量导入为提效账本草稿（skill 取实测值，baseline 默认 0 待补）。
+    """把宿主真实用量导入为提效账本草稿（skill 取实测值，baseline 默认 0 待补）。
 
     默认 dry-run（只返回草稿与预览诊断，不碰磁盘）；apply=True 才批量写回。
     baseline_ratio：按 skill_tokens*ratio 估算 baseline（假设性，非实测），便于先看提效报告。
@@ -344,7 +344,7 @@ def _resolve_import_provider(args):
 def main():
     import argparse
     parser = argparse.ArgumentParser(
-        description="办公室提效 · 长链路自动记账（office-token-booster v0.3）")
+        description="办公室提效 · 长链路自动记账（office-token-booster）")
     parser.add_argument("ledger", nargs="?", help="账本 JSON 路径")
     parser.add_argument("--ledger", dest="ledger", help="账本 JSON 路径（同位置参数）")
     parser.add_argument("--type", help="本次完成任务的类型（如 周报生成）")
@@ -359,11 +359,11 @@ def main():
     parser.add_argument("--targets", action="store_true",
                         help="改为输出「待自动化类型建议」而不写回")
     parser.add_argument("--import-host", action="store_true",
-                        help="v0.9：把本机宿主 真实用量导成账本草稿（dry-run 预览；加 --apply 写回）")
+                        help="把本机宿主 真实用量导成账本草稿（dry-run 预览；加 --apply 写回）")
     parser.add_argument("--days", type=int, default=7,
                         help="--import-host 的时间窗（最近 N 天，默认 7）")
     parser.add_argument("--baseline-ratio", type=float, default=None,
-                        help="v0.9：宿主导入时按 skill_tokens*ratio 估算 baseline（假设性，非实测扣费）")
+                        help="宿主导入时按 skill_tokens*ratio 估算 baseline（假设性，非实测扣费）")
     parser.add_argument("--provider", choices=["local", "generic"], default=None,
                         help="--import-host 的数据源：local（默认，本机宿主 traces）"
                              "或 generic（任意主机导出的用法 JSON/JSONL 文件，需配 --provider-arg）")
@@ -390,7 +390,7 @@ def main():
             return 2
         res = import_host_usage(args.ledger, days=args.days, apply=args.apply,
                                 baseline_ratio=args.baseline_ratio, provider=provider)
-        print("=== v0.9 真实宿主用量导入 ===")
+        print("=== 真实宿主用量导入 ===")
         print(res["note"])
         if args.baseline_ratio:
             print(f"[提示] 使用 --baseline-ratio {args.baseline_ratio}：baseline 按实测*"

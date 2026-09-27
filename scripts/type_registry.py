@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""任务类型字典的加载与归一（v0.5 类型字典在执行层的入口）。
+"""任务类型字典的加载与归一（类型字典在执行层的入口）。
 
 为什么需要这个模块
 ------------------
@@ -31,7 +31,7 @@ def load_registry(path: Optional[Path] = None) -> dict:
     """读取类型字典，返回「标准名 → 别名列表」映射。
 
     文件缺失 / JSON 损坏 / 结构异常时返回空字典，让上层自然退化为直匹配，
-    与 v0.4 的容错行为一致——字典是增强项，不是运行前提。
+    与既有容错行为一致——字典是增强项，不是运行前提。
     """
     registry_path = Path(path) if path is not None else REGISTRY_PATH
     try:

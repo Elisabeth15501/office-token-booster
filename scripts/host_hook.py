@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""host_hook.py — office-token-booster v0.7 宿主钩子示例（平台无关）
+"""host_hook.py — office-token-booster 宿主钩子示例（平台无关）
 
 演示宿主对话平台（天禧 / OpenClaw）如何把「任务完成」事件接进
 skill_bridge.on_conversation_event，让提效记账形成**真实闭环**：
@@ -70,13 +70,13 @@ def on_task_completed(ledger_path, event, state):
 
 def on_executor_completed(ledger_path, task_type, event, *, apply=False):
     """方向 B 闭环：宿主用 executor 跑完一个办公任务后，把带真实用量的完成事件
-    直接记回 ledger——复用 v0.7 ``build_completion_event`` 的 cost 形态。
+    直接记回 ledger——复用 build_completion_event 的 cost 形态。
 
     参数
     ----
     ledger_path : 账本 JSON 路径
     task_type   : 任务类型（如「周报生成」，会先归一化）
-    event       : v0.7 完成事件 dict，可含 "cost"（{"skill_tokens":N,"skill_minutes":M}）
+    event       : 完成事件 dict，可含 "cost"（{"skill_tokens":N,"skill_minutes":M}）
                   与 "text"（用于备注）；与 executor.propose_ledger 同源护栏。
     apply       : True 才真正写回（默认 dry-run 预览，不污染账本）
 
@@ -95,7 +95,7 @@ def on_executor_completed(ledger_path, task_type, event, *, apply=False):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="办公室提效 · v0.7 宿主钩子示例（演示真实用量自动记账）")
+        description="办公室提效 · 宿主钩子示例（演示真实用量自动记账）")
     parser.add_argument("ledger", nargs="?", help="账本 JSON 路径")
     parser.add_argument("--ledger", dest="ledger", help="账本 JSON 路径（同位置参数）")
     parser.add_argument("--demo", action="store_true",
@@ -137,7 +137,7 @@ def main():
          build_completion_event("写完了那份PPT", completed=True)),
     ]
     state = {}
-    print("=== v0.7 宿主钩子演示 ===")
+    print("=== 宿主钩子演示 ===")
     for title, ev in events:
         print("\n-- " + title)
         res, sug = on_task_completed(ledger, ev, state)
@@ -169,7 +169,7 @@ def _demo_executor_completed() -> int:
     print(md)
     print(f"[元信息] 字符数={meta['chars']}")
 
-    # 宿主回报的完成事件（含真实用量），复用 v0.7 build_completion_event 形态
+    # 宿主回报的完成事件（含真实用量），复用 build_completion_event 形态
     event = build_completion_event(
         "我刚用执行引擎生成了周报", skill_tokens=1800, skill_minutes=5, completed=True)
 

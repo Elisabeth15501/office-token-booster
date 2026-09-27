@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""skill_bridge.py — office-token-booster v0.7 真实闭环 · 去品牌化
+"""skill_bridge.py — office-token-booster 真实闭环 · 去品牌化
 
 把已有的对话编排层 conversation.handle() 接进**宿主对话平台**的「任务完成事件」，
 让「用户完成一次任务」能够**自动建议记账**——而且能带上宿主回报的**真实用量**
-（token / 分钟），把 v0.6 的「用户自报成本」升级为「实测成本」，形成真实提效闭环。
+（token / 分钟），把「用户自报成本」升级为「实测成本」，形成真实提效闭环。
 
-设计原则（延续三层解耦 + v0.4/v0.5 粘合层 + v0.6 触发适配器）：
+设计原则（延续三层解耦 + 粘合层 + 触发适配器）：
 - 只消费 conversation 暴露的 handle()/classify()/_detect_type()/_parse_numbers()，
   以及 diagnose 的 load_ledger/diagnose；**不改 diagnose / qa / report_engine /
   ledger_agent / conversation 一行**。
@@ -161,9 +161,9 @@ def on_conversation_event(ledger_path, event, state, cost_provider=None):
                     - "completed"（bool，宿主显式声明「任务已完成」的结构化事件，
                              优先级高于文本里的完成动词）
     state       : 调用方维护的 dict（与 handle 共用，含可选 "pending"）
-    cost_provider : 可选 HostCostProvider（v0.9）。当 event 未带 cost 时，
+    cost_provider : 可选 HostCostProvider。当 event 未带 cost 时，
                     用宿主真实用量补全（仅作兜底，不覆盖宿主显式回报的实测值）。
-                    不传则保持 v0.7 行为，零改动。
+                    不传则保持既有行为，零改动。
 
     返回
     ----
@@ -182,7 +182,7 @@ def on_conversation_event(ledger_path, event, state, cost_provider=None):
     ev_tokens = _coerce_int(ev_cost.get("skill_tokens"))
     ev_minutes = _coerce_int(ev_cost.get("skill_minutes"))
 
-    # v0.9：事件未带 cost 但提供了 cost_provider → 用宿主真实用量兜底补全。
+    # 事件未带 cost 但提供了 cost_provider → 用宿主真实用量兜底补全。
     # 仅当事件自身没有成本数字时才回退，绝不覆盖宿主显式回报的实测值。
     if (ev_tokens is None and ev_minutes is None) and cost_provider is not None:
         try:
@@ -301,7 +301,7 @@ def main():
          {"role": "user", "text": "今天天气不错"}),
     ]
     state = {}
-    print("=== v0.7 真实闭环演示（去品牌化）===")
+    print("=== 真实闭环演示（去品牌化）===")
     for title, ev in demos:
         print("\n-- " + title)
         res = on_conversation_event(ledger, ev, state)
@@ -319,7 +319,7 @@ def main():
 
 def argparse_init():
     p = argparse.ArgumentParser(
-        description="办公室提效 · v0.7 真实闭环（接宿主对话事件、携带真实用量自动建议记账）")
+        description="办公室提效 · 真实闭环（接宿主对话事件、携带真实用量自动建议记账）")
     p.add_argument("ledger", nargs="?", help="账本 JSON 路径")
     p.add_argument("--ledger", dest="ledger", help="账本 JSON 路径（同位置参数）")
     p.add_argument("--demo", action="store_true",

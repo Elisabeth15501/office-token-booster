@@ -6,12 +6,12 @@
 单一对话流：用户说一句，本层理解意图、调用对应的内核能力，必要时建议记账。
 
 设计原则（与三层解耦一致）：
-- 只消费既有模块，**绝不改 qa / report_engine / ledger_agent 一行**。v0.4/v0.5 完全是新增的
+- 只消费既有模块，**绝不改 qa / report_engine / ledger_agent 一行**。本层完全是新增的
   "粘合层"，复用它们暴露的纯函数（answer_followup / generate_* / propose_* / run_long_chain）。
 - 纯标准库、无第三方依赖、无网络、无硬编码密钥。
 - 状态用普通 dict 传递（state["pending"] 保存待确认条目），便于上层 Skill / 对话 UI 集成。
 - 安全默认：记账必须显式「确认」才写回账本（ledger_agent 内部仍是默认 dry-run + 备份）。
-- v0.5 新增：类型字典 type_registry.json 消除自然语言里任务类型的歧义（如『周报』→『周报生成』），
+- 类型字典 type_registry.json 消除自然语言里任务类型的歧义（如『周报』→『周报生成』），
   让记账类型始终落到标准名，不再依赖脆弱的子串猜测。
 
 用法：
@@ -48,11 +48,11 @@ from executor import (  # noqa: E402  # execute 意图路由复用执行引擎
 
 
 # ─────────────────────────────────────────────────────────────
-# 类型字典（v0.5）：标准类型名 ↔ 别名/关键词
+# 类型字典：标准类型名 ↔ 别名/关键词
 # ─────────────────────────────────────────────────────────────
 
 def _load_registry():
-    """读取类型字典；文件缺失/损坏时降级为空字典（退化为 v0.4 行为）。
+    """读取类型字典；文件缺失/损坏时降级为空字典（退化为无字典的行为）。
 
     实际读取委托给 `type_registry.load_registry`——字典的加载与容错规则只留一处，
     对话层（本模块 `_detect_type`）与执行层（`executor.resolve_exec_type`）共用同一事实源。
@@ -77,7 +77,7 @@ _NUM_PREFIX_RE = re.compile(r"(\d[\d,]*\.?\d*)\s*(万|千|k|w)?")
 # 关键词正则：数字须紧邻其后的关键词才命中（保留原语义，杜绝遥远处误命中）。
 _TOKEN_KW_RE = re.compile(r"\s*(?:个\s*)?(?:token|tokens|Token|TOKEN)", re.I)
 _MIN_KW_RE = re.compile(r"\s*(?:分钟|分|min|mins)", re.I)
-# 类型抽取（v0.5 短语抓取）：预编译单行正则，消除 classify 每次重建。
+# 类型抽取（短语抓取）：预编译单行正则，消除 classify 每次重建。
 _TYPE_EXTRACT_RE = re.compile(
     r"(?:记一笔|记录|记账|记一下|记上|登记|添加任务|新增任务|记下来|写进账本|"
     r"生成了|做了|完成了|写好?了|做好?了|产出|整理|搞完?了)\s*"
@@ -144,7 +144,7 @@ def _parse_skill_and_baseline(text):
 def _detect_type(text, diag):
     """判断任务类型，返回 (type, is_new) 元组。
 
-    匹配优先级（v0.5）：
+    匹配优先级：
       1. 账本里已记录的标准类型名精确出现 → 直接用
       2. 类型字典：标准名或别名/关键词出现在话里 → 映射到标准名
       3. 短语抓取（『生成了/做了…<词>』）→ 依次用账本类型、字典做模糊匹配
@@ -217,7 +217,7 @@ COMPLETION_VERBS = (
 _COMPLETION_VERBS_RE = re.compile(COMPLETION_VERBS)
 
 
-# 执行意图识别（Phase 3 新增）：用户说「帮我写周报 / 生成纪要 / 做PPT」等主动执行请求。
+# 执行意图识别：用户说「帮我写周报 / 生成纪要 / 做PPT」等主动执行请求。
 # 仅匹配具体任务域词（周报/纪要/数据/文档/PPT），不吞「报告/摘要」（走 report 意图）。
 _EXEC_RE = re.compile(
     r"(帮我|请|麻烦|替我|给我|来个)?\s*"
@@ -312,7 +312,7 @@ def handle(ledger_path, text, state, intent=None):
         if not pending:
             # 没有待确认项：不返回错误式提示，降级为普通追问应答（修复 H2）
             return answer_followup(diag, text)
-        # Phase 3：确认时允许补充成本（execute 场景常在此补 baseline）；
+        # 确认时允许补充成本（execute 场景常在此补 baseline）；
         # 同时做成本完整性护栏，避免 execute 无成本时写入全 0 污染账本。
         # 分段解析：baseline 触发词之前=skill 段、之后=baseline 段，互不吞
         # （修复对抗式审查 C1：同句给 skill+baseline 时 skill 不再被静默丢弃）。

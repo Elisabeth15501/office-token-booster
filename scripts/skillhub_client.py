@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""skillhub_client.py — office-token-booster v0.9.2 SkillHub 客户端
+"""skillhub_client.py — office-token-booster SkillHub 客户端
 
 提供 SkillHub 联网搜索能力，支持：
 - 关键词搜索 Skill

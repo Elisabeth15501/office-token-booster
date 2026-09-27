@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""host_cost.py — office-token-booster v0.9 真实宿主用量接入（隔离层，防屎山）
+"""host_cost.py — office-token-booster 真实宿主用量接入（隔离层，防屎山）
 
 把「宿主平台的真实 Token / 耗时用量」接入提效账本，让 skill_tokens 从「用户自报」
 升级为「宿主实测」。设计红线（与三层解耦一致）：
 
 - 单一抽象 HostCostProvider：fetch_recent(days) -> list[CostRecord]。
 - 两个实现：
-    - EventCostProvider       —— 包装一次宿主回报的 event["cost"]（v0.7 已支持的真实路径，
+    - EventCostProvider       —— 包装一次宿主回报的 event["cost"]（真实路径，
                                  在此升级为可单测的一等公民）。
     - LocalProvider  —— 只读本机宿主 的本地用量数据
                                  （~/.workbuddy/traces、workbuddy.db、usage-log.json）。
@@ -378,7 +378,7 @@ def draft_entries_from_host(provider: HostCostProvider, days: int = 7, *,
 def main():
     import argparse
     parser = argparse.ArgumentParser(
-        description="办公室 Token 洞察 · v0.9 真实宿主用量接入（只读本机宿主 数据）")
+        description="办公室 Token 洞察 · 真实宿主用量接入（只读本机宿主 数据）")
     parser.add_argument("--days", type=int, default=7, help="最近 N 天（默认 7）")
     parser.add_argument("--json", action="store_true", help="以 JSON 输出原始记录")
     args = parser.parse_args()

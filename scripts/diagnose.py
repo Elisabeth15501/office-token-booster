@@ -187,6 +187,85 @@ def compute_roi_targets(by_type, span_days=None):
     return targets
 
 
+def _group_sum(tasks, key_of):
+    """按 key_of(task) 分组，累加 Token / 分钟与计数。
+
+    按类型聚合与按周聚合共用此函数：两者的累加口径完全一致，
+    分开写会变成两段结构相同、改一处忘另一处的重复代码。
+    """
+    groups = {}
+    for t in tasks:
+        g = groups.setdefault(key_of(t), {"baseline_tokens": 0, "skill_tokens": 0,
+                                          "baseline_minutes": 0, "skill_minutes": 0, "count": 0})
+        g["baseline_tokens"] += t.get("baseline_tokens", 0) or 0
+        g["skill_tokens"] += t.get("skill_tokens", 0) or 0
+        g["baseline_minutes"] += t.get("baseline_minutes", 0) or 0
+        g["skill_minutes"] += t.get("skill_minutes", 0) or 0
+        g["count"] += 1
+    return groups
+
+
+def _with_saved(g):
+    """补出 saved_* 与 token_save_pct（两组聚合的派生口径一致）。"""
+    g["saved_tokens"] = g["baseline_tokens"] - g["skill_tokens"]
+    g["saved_minutes"] = g["baseline_minutes"] - g["skill_minutes"]
+    g["token_save_pct"] = _safe_div(g["saved_tokens"], g["baseline_tokens"]) * 100
+    return g
+
+
+def _iso_week_of(task):
+    """取 date 的 ISO 周；日期缺失或非法时归入「未知周」而不是丢弃该条任务。"""
+    try:
+        return datetime.strptime(task.get("date", ""), "%Y-%m-%d").strftime("%Y-W%V")
+    except (ValueError, TypeError):
+        return "未知周"
+
+
+def _aggregate_by_type(tasks):
+    """按任务类型聚合，质量分单独累加（只统计填了质量分的任务）。"""
+    groups = _group_sum(tasks, lambda t: t.get("type", "其他"))
+    quality = {}
+    for t in tasks:
+        if t.get("quality_score") is None:
+            continue
+        ty = t.get("type", "其他")
+        total, cnt = quality.get(ty, (0, 0))
+        quality[ty] = (total + t["quality_score"], cnt + 1)
+
+    by_type = []
+    for ty, d in groups.items():
+        d["task_type"] = ty
+        _with_saved(d)
+        d["time_save_pct"] = _safe_div(d["saved_minutes"], d["baseline_minutes"]) * 100
+        total, cnt = quality.get(ty, (0, 0))
+        d["quality_score_avg"] = round(total / cnt) if cnt else None
+        by_type.append(d)
+    by_type.sort(key=lambda x: x["saved_tokens"], reverse=True)
+    return by_type
+
+
+def _aggregate_by_week(tasks):
+    """按 ISO 周聚合，供周趋势与「本期 vs 上期」对比使用。"""
+    by_week = []
+    for wk, w in _group_sum(tasks, _iso_week_of).items():
+        w["week"] = wk
+        _with_saved(w)
+        by_week.append(w)
+    by_week.sort(key=lambda x: x["week"])
+    return by_week
+
+
+def _span_days(tasks):
+    """记录周期跨度（天）：用于把累计节省外推到「月度」计算 ROI。"""
+    dates = []
+    for t in tasks:
+        try:
+            dates.append(datetime.strptime(t["date"], "%Y-%m-%d"))
+        except (ValueError, TypeError, KeyError):
+            pass
+    return (max(dates) - min(dates)).days + 1 if len(dates) >= 2 else 0
+
+
 def compute_summary(tasks):
     """把 tasks 汇总为结构化摘要（dict）。diagnose() 会包装为 Diagnosis。"""
     total_base_tok = sum(t.get("baseline_tokens", 0) or 0 for t in tasks)
@@ -198,70 +277,14 @@ def compute_summary(tasks):
     saved_tok = total_base_tok - total_skill_tok
     saved_min = total_base_min - total_skill_min
 
-    # 按任务类型聚合
-    by_type_map = {}
-    for t in tasks:
-        ty = t.get("type", "其他")
-        d = by_type_map.setdefault(ty, {"task_type": ty, "baseline_tokens": 0, "skill_tokens": 0,
-                                       "baseline_minutes": 0, "skill_minutes": 0, "count": 0,
-                                       "quality_score_sum": 0, "quality_score_n": 0})
-        d["baseline_tokens"] += t.get("baseline_tokens", 0) or 0
-        d["skill_tokens"] += t.get("skill_tokens", 0) or 0
-        d["baseline_minutes"] += t.get("baseline_minutes", 0) or 0
-        d["skill_minutes"] += t.get("skill_minutes", 0) or 0
-        d["count"] += 1
-        if t.get("quality_score") is not None:
-            d["quality_score_sum"] += t["quality_score"]
-            d["quality_score_n"] += 1
-
-    by_type = []
-    for ty, d in by_type_map.items():
-        d["saved_tokens"] = d["baseline_tokens"] - d["skill_tokens"]
-        d["saved_minutes"] = d["baseline_minutes"] - d["skill_minutes"]
-        d["token_save_pct"] = _safe_div(d["saved_tokens"], d["baseline_tokens"]) * 100
-        d["time_save_pct"] = _safe_div(d["saved_minutes"], d["baseline_minutes"]) * 100
-        d["quality_score_avg"] = round(d["quality_score_sum"] / d["quality_score_n"]) if d["quality_score_n"] else None
-        by_type.append(d)
-    by_type.sort(key=lambda x: x["saved_tokens"], reverse=True)
+    by_type = _aggregate_by_type(tasks)
+    by_week = _aggregate_by_week(tasks)
+    span_days = _span_days(tasks)
 
     # 不降质量护栏：整体质量分均值（仅聚含有质量分的任务；无则 avg_quality=0 / has_quality=False）
     qvals = [t["quality_score"] for t in tasks if t.get("quality_score") is not None]
     avg_quality = round(sum(qvals) / len(qvals)) if qvals else 0
     has_quality = bool(qvals)
-
-    # 按周聚合（取 date 的 ISO 周）
-    by_week_map = {}
-    for t in tasks:
-        date = t.get("date", "")
-        try:
-            dt = datetime.strptime(date, "%Y-%m-%d")
-            wk = dt.strftime("%Y-W%V")
-        except (ValueError, TypeError):
-            wk = "未知周"
-        w = by_week_map.setdefault(wk, {"week": wk, "baseline_tokens": 0, "skill_tokens": 0,
-                                        "baseline_minutes": 0, "skill_minutes": 0, "count": 0})
-        w["baseline_tokens"] += t.get("baseline_tokens", 0) or 0
-        w["skill_tokens"] += t.get("skill_tokens", 0) or 0
-        w["baseline_minutes"] += t.get("baseline_minutes", 0) or 0
-        w["skill_minutes"] += t.get("skill_minutes", 0) or 0
-        w["count"] += 1
-
-    by_week = []
-    for wk, w in by_week_map.items():
-        w["saved_tokens"] = w["baseline_tokens"] - w["skill_tokens"]
-        w["saved_minutes"] = w["baseline_minutes"] - w["skill_minutes"]
-        w["token_save_pct"] = _safe_div(w["saved_tokens"], w["baseline_tokens"]) * 100
-        by_week.append(w)
-    by_week.sort(key=lambda x: x["week"])
-
-    # 记录周期跨度（天）：用于把累计节省外推到「月度」计算 ROI
-    _dates = []
-    for t in tasks:
-        try:
-            _dates.append(datetime.strptime(t["date"], "%Y-%m-%d"))
-        except (ValueError, TypeError, KeyError):
-            pass
-    span_days = (max(_dates) - min(_dates)).days + 1 if len(_dates) >= 2 else 0
 
     period_compare = compute_period_compare(by_week)
     roi_targets = compute_roi_targets(by_type, span_days)

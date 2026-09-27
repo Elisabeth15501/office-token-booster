@@ -728,6 +728,81 @@ def _read_input(src: str) -> str:
     return src
 
 
+def _init_ledger(path) -> int:
+    """一等「创建空账本」命令：替代脆弱的 echo / python -c 手写初始化（易写错 JSON）。"""
+    p = Path(path)
+    if p.exists():
+        print(f"[提示] 账本已存在，跳过初始化：{path}（如需重建请先删除旧文件）", file=sys.stderr)
+        return 0
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"tasks": []}, ensure_ascii=False), encoding="utf-8")
+    print(f"[完成] 已创建空账本：{path}（写入 {{\"tasks\":[]}}）", file=sys.stderr)
+    return 0
+
+
+def _emit_output(md, meta, std_type, title, args) -> int:
+    """按 --format 输出交付物：md/html 写文件或 stdout；docx/xlsx 走可选导出（缺库自动降级）。"""
+    if args.format in ("docx", "xlsx"):
+        if not args.output:
+            print("[错误] --format docx/xlsx 需要配合 --output 指定输出路径", file=sys.stderr)
+            return 2
+        if args.format == "docx":
+            actual, status = export_docx(md, args.output, title)
+        else:
+            actual, status = export_xlsx(md, args.output, title)
+        if status.startswith("degraded"):
+            print(f"[完成·降级] 富格式库未安装，已降级导出 → {actual}（{meta['chars']} 字符）", file=sys.stderr)
+        else:
+            print(f"[完成] 已生成 {std_type} 交付物（{args.format}）→ {actual}（{meta['chars']} 字符）", file=sys.stderr)
+        return 0
+
+    rendered = _md_to_html(md, title) if args.format == "html" else md
+    if args.output:
+        out_path = args.output
+        if not out_path.endswith((".md", ".html")):
+            out_path = out_path + (".html" if args.format == "html" else ".md")
+        Path(out_path).write_text(rendered, encoding="utf-8")
+        print(f"[完成] 已生成 {std_type} 交付物 → {out_path}（{meta['chars']} 字符）", file=sys.stderr)
+    else:
+        print(rendered)
+    return 0
+
+
+def _apply_ledger(args, std_type) -> int:
+    """把本次执行记回账本。默认仅预览，加 --confirm-ledger 才真正写回。"""
+    cost = None
+    if args.cost_json:
+        try:
+            cost = json.loads(args.cost_json)
+        except json.JSONDecodeError as e:
+            print(f"[错误] --cost-json 解析失败：{e}", file=sys.stderr)
+            return 2
+    try:
+        res = propose_ledger(
+            args.apply_ledger, std_type, cost=cost,
+            skill_tokens=args.skill_tokens, skill_minutes=args.skill_minutes,
+            baseline_tokens=args.baseline_tokens, baseline_minutes=args.baseline_minutes,
+            note=args.note or f"执行引擎：{std_type}", apply=args.confirm_ledger,
+        )
+    except FileNotFoundError:
+        # 账本文件不存在时给出友好提示（而非原始栈）：交付物已正常生成，仅跳过记账。
+        print(f"[错误] 记账账本文件不存在：{args.apply_ledger}", file=sys.stderr)
+        print("       请先创建空账本后再记账：", file=sys.stderr)
+        print(f"       .venv\\Scripts\\python scripts\\executor.py --init-ledger {args.apply_ledger}", file=sys.stderr)
+        print("[提示] 本次交付物已正常生成，仅自动记账被跳过。", file=sys.stderr)
+        return 0
+    if res is None:
+        print("[记账] ledger_agent 不可用，跳过自动记账。", file=sys.stderr)
+    elif res.get("blocked"):
+        block_reason = res.get("block_reason") or res.get("reason") or "（未知原因，请检查 baseline）"
+        print(f"[记账] 已拦截：{block_reason}（请补填 baseline 后确认写回）", file=sys.stderr)
+    elif args.confirm_ledger:
+        print(f"[记账] 已写回账本：{res.get('ledger_path')}", file=sys.stderr)
+    else:
+        print("[记账] 预览（dry-run）：确认后加 --confirm-ledger 写回。", file=sys.stderr)
+    return 0
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="office-token-booster 执行引擎")
     ap.add_argument("--type", required=False, help="任务类型（周报生成/会议纪要/数据分析/文档整理/PPT大纲）；--init-ledger 时无需此参数")
@@ -746,16 +821,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--init-ledger", help="创建空账本文件（写入 {\"tasks\":[]}），用于首次记账前初始化；指定后无需 --type")
     args = ap.parse_args(argv)
 
-    # 一等「创建空账本」命令：替代脆弱的 echo / python -c 手写初始化（易写错 JSON）。
     if args.init_ledger:
-        p = Path(args.init_ledger)
-        if p.exists():
-            print(f"[提示] 账本已存在，跳过初始化：{args.init_ledger}（如需重建请先删除旧文件）", file=sys.stderr)
-            return 0
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({"tasks": []}, ensure_ascii=False), encoding="utf-8")
-        print(f"[完成] 已创建空账本：{args.init_ledger}（写入 {{\"tasks\":[]}}）", file=sys.stderr)
-        return 0
+        return _init_ledger(args.init_ledger)
 
     if not args.type:
         print("[错误] 缺少 --type（或使用 --init-ledger 创建账本）。", file=sys.stderr)
@@ -770,65 +837,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"[错误] 执行引擎暂不支持「{args.type}」。支持：{', '.join(_DISPATCH)}", file=sys.stderr)
         return 2
 
-    text = _read_input(args.input)
-    md, meta = execute(std_type, text)
-    title = f"{std_type} · {_today_iso()}"
-
-    # 富格式导出（docx / xlsx）需指定 --output
-    if args.format in ("docx", "xlsx"):
-        if not args.output:
-            print("[错误] --format docx/xlsx 需要配合 --output 指定输出路径", file=sys.stderr)
-            return 2
-        if args.format == "docx":
-            actual, status = export_docx(md, args.output, title)
-        else:
-            actual, status = export_xlsx(md, args.output, title)
-        if status.startswith("degraded"):
-            print(f"[完成·降级] 富格式库未安装，已降级导出 → {actual}（{meta['chars']} 字符）", file=sys.stderr)
-        else:
-            print(f"[完成] 已生成 {std_type} 交付物（{args.format}）→ {actual}（{meta['chars']} 字符）", file=sys.stderr)
-    else:
-        rendered = _md_to_html(md, title) if args.format == "html" else md
-        if args.output:
-            out_path = args.output
-            if not out_path.endswith((".md", ".html")):
-                out_path = out_path + (".html" if args.format == "html" else ".md")
-            Path(out_path).write_text(rendered, encoding="utf-8")
-            print(f"[完成] 已生成 {std_type} 交付物 → {out_path}（{meta['chars']} 字符）", file=sys.stderr)
-        else:
-            print(rendered)
+    md, meta = execute(std_type, _read_input(args.input))
+    rc = _emit_output(md, meta, std_type, f"{std_type} · {_today_iso()}", args)
+    if rc != 0:
+        return rc
 
     if args.apply_ledger:
-        cost = None
-        if args.cost_json:
-            try:
-                cost = json.loads(args.cost_json)
-            except json.JSONDecodeError as e:
-                print(f"[错误] --cost-json 解析失败：{e}", file=sys.stderr)
-                return 2
-        try:
-            res = propose_ledger(
-                args.apply_ledger, std_type, cost=cost,
-                skill_tokens=args.skill_tokens, skill_minutes=args.skill_minutes,
-                baseline_tokens=args.baseline_tokens, baseline_minutes=args.baseline_minutes,
-                note=args.note or f"执行引擎：{std_type}", apply=args.confirm_ledger,
-            )
-        except FileNotFoundError:
-            # 账本文件不存在时给出友好提示（而非原始栈）：交付物已正常生成，仅跳过记账。
-            print(f"[错误] 记账账本文件不存在：{args.apply_ledger}", file=sys.stderr)
-            print("       请先创建空账本后再记账：", file=sys.stderr)
-            print(f"       .venv\\Scripts\\python scripts\\executor.py --init-ledger {args.apply_ledger}", file=sys.stderr)
-            print("[提示] 本次交付物已正常生成，仅自动记账被跳过。", file=sys.stderr)
-            return 0
-        if res is None:
-            print("[记账] ledger_agent 不可用，跳过自动记账。", file=sys.stderr)
-        elif res.get("blocked"):
-            block_reason = res.get("block_reason") or res.get("reason") or "（未知原因，请检查 baseline）"
-            print(f"[记账] 已拦截：{block_reason}（请补填 baseline 后确认写回）", file=sys.stderr)
-        elif args.confirm_ledger:
-            print(f"[记账] 已写回账本：{res.get('ledger_path')}", file=sys.stderr)
-        else:
-            print("[记账] 预览（dry-run）：确认后加 --confirm-ledger 写回。", file=sys.stderr)
+        return _apply_ledger(args, std_type)
     return 0
 
 

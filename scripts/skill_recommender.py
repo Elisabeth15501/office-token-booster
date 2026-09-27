@@ -15,12 +15,15 @@
 from __future__ import annotations
 
 import html as _html
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 # 安全：所有进 HTML 的字段（含来源链接文本）必须转义；
 # URL 仅允许 http/https，杜绝 javascript: 等协议注入。
 _esc = _html.escape
+
+# 优先级 → 排序权重（CRITICAL 排最前）
+_PRIORITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2}
 
 
 def _safe_url(u):
@@ -76,11 +79,13 @@ _TASK_TYPE_RULES = [
     },
     {
         "keywords": ["终端", "日志", "编译", "测试", "git", "命令行", "CLI", "构建"],
-        "skill": "rtk",
-        "reason_template": "你的'{task_type}'任务涉及终端输出，RTK 过滤 CLI 噪声，实测平均减 89% 无效 Token",
-        "expected_saving": "-89% CLI noise (RTK benchmark, 2,900+ commands)",
-        "priority": "MEDIUM",
-        "evidence_url": "https://github.com/rtk-ai/rtk",
+        "skill": SkillRecommendation(
+            skill="rtk",
+            reason="你的'{task_type}'任务涉及终端输出，RTK 过滤 CLI 噪声，实测平均减 89% 无效 Token",
+            expected_saving="-89% CLI noise (RTK benchmark, 2,900+ commands)",
+            priority="MEDIUM",
+            evidence_url="https://github.com/rtk-ai/rtk",
+        ),
     },
     {
         "keywords": ["周报", "纪要", "会议纪要", "总结", "报告"],
@@ -94,22 +99,12 @@ _TASK_TYPE_RULES = [
     },
 ]
 
-# 全局阈值规则：总消耗超过阈值时触发
+# 全局阈值规则：任务数达到阈值即触发（与具体任务类型无关）。
+# 不设「消耗金额」阈值：账本只记 Token / 分钟，没有成本字段，
+# 按金额触发需要先引入定价换算（属新功能，不是规则配置），故不声明以免误导读者。
 _GLOBAL_RULES = [
     {
-        "threshold_cost": 50.0,  # 元/周
-        "condition": "total_cost >= threshold",
-        "skill": SkillRecommendation(
-            skill="token-diet",
-            reason="本周总消耗较高，token-diet 六维治理综合优化，平均减 31% 账单",
-            expected_saving="-31% bill on average (token-diet Sonnet 5 benchmark)",
-            priority="CRITICAL",
-            evidence_url="https://github.com/Kulaxyz/token-diet",
-        ),
-    },
-    {
-        "threshold_tasks": 10,  # 任务数
-        "condition": "total_tasks >= threshold",
+        "threshold_tasks": 10,
         "skill": SkillRecommendation(
             skill="caveman",
             reason="本周任务频繁，Caveman 让 AI 精简回复，累计节省可观",
@@ -119,6 +114,33 @@ _GLOBAL_RULES = [
         ),
     },
 ]
+
+
+def _match_task_type_rules(by_type) -> dict[str, SkillRecommendation]:
+    """按任务类型关键词匹配。同名 Skill 只保留首次命中（规则表顺序即优先级）。"""
+    matched: dict[str, SkillRecommendation] = {}
+    for type_stat in by_type:
+        task_type = type_stat.get("task_type", "")
+        for rule in _TASK_TYPE_RULES:
+            if any(kw in task_type for kw in rule["keywords"]):
+                rec = rule["skill"]
+                # 理由里的 {task_type} 占位在命中时填入实际类型名
+                matched.setdefault(
+                    rec.skill,
+                    replace(rec, reason=rec.reason.format(task_type=task_type)),
+                )
+                break
+    return matched
+
+
+def _match_global_rules(total_tasks) -> dict[str, SkillRecommendation]:
+    """按总任务数匹配全局阈值规则（与具体任务类型无关）。"""
+    matched: dict[str, SkillRecommendation] = {}
+    for rule in _GLOBAL_RULES:
+        if total_tasks >= rule["threshold_tasks"]:
+            rec = rule["skill"]
+            matched.setdefault(rec.skill, rec)
+    return matched
 
 
 def recommend_skills(
@@ -136,61 +158,15 @@ def recommend_skills(
     Returns:
         SkillRecommendation 列表，按 priority 降序排列
     """
-    recommendations: dict[str, SkillRecommendation] = {}
+    recommendations = _match_task_type_rules(by_type)
+    for skill, rec in _match_global_rules(total_tasks).items():
+        recommendations.setdefault(skill, rec)
 
-    # 1. 任务类型匹配
-    for type_stat in by_type:
-        task_type = type_stat.get("task_type", "")
-        for rule in _TASK_TYPE_RULES:
-            keywords = rule.get("keywords", [])
-            if not keywords:
-                continue
-            if any(kw in task_type for kw in keywords):
-                rec = rule["skill"]
-                if isinstance(rec, SkillRecommendation):
-                    # 替换模板变量
-                    final_reason = rec.reason.format(task_type=task_type)
-                    rec = SkillRecommendation(
-                        skill=rec.skill,
-                        reason=final_reason,
-                        expected_saving=rec.expected_saving,
-                        priority=rec.priority,
-                        evidence_url=rec.evidence_url,
-                    )
-                elif isinstance(rec, str):
-                    # 兼容旧格式（字符串 skill 名 + 单独字段）
-                    rule_data = {k: v for k, v in rule.items() if k != "skill"}
-                    rec = SkillRecommendation(
-                        skill=rule_data.get("skill", rec),
-                        reason=rule_data.get("reason_template", f"你的'{task_type}'任务适合 {rec}").format(
-                            task_type=task_type
-                        ),
-                        expected_saving=rule_data["expected_saving"],
-                        priority=rule_data.get("priority", "MEDIUM"),
-                        evidence_url=rule_data.get("evidence_url"),
-                    )
-                # 去重：只保留第一个匹配（最高优先级）
-                if rec.skill not in recommendations:
-                    recommendations[rec.skill] = rec
-                break
-
-    # 2. 全局阈值规则（按任务数量触发）
-    for rule in _GLOBAL_RULES:
-        if "threshold_tasks" in rule and total_tasks >= rule["threshold_tasks"]:
-            rec = rule["skill"]
-            if rec.skill not in recommendations:
-                recommendations[rec.skill] = rec
-
-    # 3. 排序：CRITICAL > HIGH > MEDIUM
-    priority_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2}
     sorted_recs = sorted(
         recommendations.values(),
-        key=lambda x: priority_order.get(x.priority, 99),
+        key=lambda x: _PRIORITY_ORDER.get(x.priority, 99),
     )
-
-    result = sorted_recs[:max_recommendations]
-
-    return result
+    return sorted_recs[:max_recommendations]
 
 
 def format_recommendation_md(rec: SkillRecommendation) -> str:
