@@ -4,6 +4,19 @@
 
 ---
 
+## v1.0.4 — 文档叙述清理 + ClawHub 分发裁剪（2026-10-04）
+
+纯文档 / 打包面变更，**零代码行为变更**（全量测试基线 186 passed / 3 skipped 不变）。
+
+### 变更
+
+- **清理 SKILL.md 旧版本叙事残留**：移除小节标题与正文里的 `v0.x` 演化叙述（如「v0.3 长链路 Agent」「v0.4 粘合层」「v0.5 再往前一步」「v0.6 接宿主对话事件」「v0.7 去品牌化」、`ADR-9`、内部 `方向 B` 代号等），改为直接描述能力本身；小节标题一律去掉版本号前缀。
+- **修正一处陈旧测试断言**：`tests/test_v09_skillmd.py` 曾硬编码断言 SKILL.md 必须出现旧标签 `任务执行（方向 B）`；改为断言能力表格通用的 `| 任务执行 |`，保留「能力表须列出已落地的任务执行能力 + 自动记账闭环」的本意守卫。
+- **新增 `.clawhubignore`**（仅影响 ClawHub 分发包）：排除 `LICENSE`（全站强制 MIT-0，与仓库 MIT 条款冲突）、`scripts/clawhub_client.py` / `scripts/skillhub_client.py`（发布者自用上传客户端）、`scripts/security_preflight.py`（开发期预检脚本）、`tests/` 与开发期 requirements；SKILL.md 未将上述任一项声明为用户能力，故不构成「声明与内容不符」。
+- **补齐跨平台声明一致性**：SKILL.md frontmatter 移除 `license: MIT`（ClawHub 不支持按技能覆盖许可证）并补 `metadata.openclaw.requires.bins: [python3]`（与核心脚本实际使用 Python 一致，`env: []` 亦与实际无环境变量读取相符）；同步移除 `network` 里「天禧AI 上架版」的单一平台措辞。
+
+---
+
 ## v1.0.3 — 代码质量整改（clean-code 审计红/黄项清零）（2026-09-28）
 
 纯重构，**对外行为等价**：CLI 参数、报告结构、问句应答、输出格式全部不变。

@@ -1,9 +1,8 @@
 ---
 name: office-token-booster
 description: "办公室 AI 提效助手 —— 既帮你做周报/会议纪要/数据分析/文档整理/PPT 大纲，又自动记下每次帮你省了多少 Token 和时间。执行与度量一体：做完任务顺手记一笔，省了多少一目了然。适用于办公生产力执行、AI 用量洞察、提效度量与自动化决策场景。"
-version: 1.0.3
+version: 1.0.4
 author: Elisabeth15501
-license: MIT
 tags:
   - 办公生产力
   - 效率工具
@@ -66,12 +65,13 @@ tools:
   - shell
 network:
   outbound: false
-  note: "天禧AI 上架版：联网推荐（clawhub/lightmake 技能市场）已禁用，仅保留本地推荐；核心执行/度量/报告全流程纯本地、零联网、不读密钥"
+  note: "联网推荐（clawhub/lightmake 技能市场）已禁用，仅保留本地推荐；核心执行/度量/报告全流程纯本地、零联网、不读密钥"
 
 metadata:
   openclaw:
     requires:
       python: ">=3.10"
+      bins: [python3]
     env: []
     platform: ["tianxi", "openclaw", "linux", "macos", "windows"]
 ---
@@ -100,11 +100,11 @@ metadata:
 
 ## 能做什么（真实范围）
 
-本技能**既执行、又度量**。下列能力均已落地（118 测试全绿）：
+本技能**既执行、又度量**。下列能力均已落地（186 测试通过，另 3 个条件跳过）：
 
 | 能力 | 输入 | 产出 |
 |------|------|------|
-| 任务执行（方向 B） | 原始内容（本周要点 / 转录 / CSV / 长文 / 主题） | 结构化可交付物（Markdown，可选 HTML / docx / xlsx）+ 执行后自动记账建议 |
+| 任务执行 | 原始内容（本周要点 / 转录 / CSV / 长文 / 主题） | 结构化可交付物（Markdown，可选 HTML / docx / xlsx）+ 执行后自动记账建议 |
 | 提效账本 | 任务记录 JSON（`baseline` 笨办法估计 vs `skill` 实际 AI 成本） | MD / HTML 提效报告（节省 Token、耗时、率、趋势） |
 | Token 洞察可视化 | 账本 | 环形图 + 趋势折线图 + 本期 vs 上期对比卡 + 自动化 ROI Top N 卡 |
 | 对话式诊断 | 账本 + 自然语言追问 | 锚定内核的结构化回答（类型排名 / 最差场景 / 周趋势 / 周期对比 / 可信度） |
@@ -129,7 +129,7 @@ metadata:
 
 ## 快速开始（QUICKSTART）
 
-> 完整 hands-on 实操（含 PowerShell 注意事项、常见任务示例）见同目录 **[QUICKSTART.md](QUICKSTART.md)**。下面给出方向 B 的核心闭环速览。
+> 完整 hands-on 实操（含 PowerShell 注意事项、常见任务示例）见同目录 **[QUICKSTART.md](QUICKSTART.md)**。下面给出核心闭环速览。
 
 零依赖（纯标准库 Python ≥3.10），从项目目录即可跑通「做任务 → 自动记账 → 看报告」闭环。
 
@@ -139,7 +139,7 @@ metadata:
 python scripts/executor.py --init-ledger examples/ledger.json
 ```
 
-**2) 执行任务并自动记账（方向 B 核心）**
+**2) 执行任务并自动记账**
 
 先把任务做成交付物，再走「预览 + 确认写回」把省了多少记进账本：
 
@@ -184,7 +184,7 @@ python scripts/host_cost.py --days 7
 python scripts/ledger_agent.py examples/ledger.json --import-host --days 7
 ```
 
-**全量测试：**
+**全量测试（源码仓库内，含测试套件；分发包不含测试）：**
 
 ```bash
 pytest tests/ -q --alluredir=allure-results
@@ -227,9 +227,9 @@ pytest tests/ -q --alluredir=allure-results
 
 > 一页摘要与完整报告共用同一份 `Diagnosis` 内核，追问题也不重新计算，保证首屏、追问、完整报告三处数字完全一致。
 
-## 长链路自动记账（v0.3 长链路 Agent）
+## 长链路自动记账
 
-对话式诊断是「只读、响应式」外壳；v0.3 在此基础上叠加**主动管道**：任务完成后，让 Agent 自动把这笔账记回 `examples/ledger.json`，减少你手填负担。它直接消费共享内核 `diagnose()`，对话层（`qa.py`）与报告层（`report_engine.py`）**一行都不用改**。
+技能提供**主动记账管道**：任务完成后，让 Agent 自动把这笔账记回 `examples/ledger.json`，减少你手填负担。
 
 由 `scripts/ledger_agent.py` 提供，三个动作可组合：
 
@@ -243,13 +243,13 @@ pytest tests/ -q --alluredir=allure-results
 
 完整流程编排见 `run_long_chain(ledger_path, task_type, ...)`：load_ledger → diagnose → propose → append → 重新 diagnose。
 
-> 安全默认：不加 `--apply` 绝不改动你的账本文件。Agent 写回的仍是「用户账本」，不是平台 Trace——这与 ADR-9 上传/导出模式一致。
+> 安全默认：不加 `--apply` 绝不改动你的账本文件。
 
-## 对话式自动记账编排（v0.4 粘合层）
+## 对话式自动记账编排
 
-v0.3 给了「主动记账」的原子能力；v0.4 把它们与对话式诊断、报告**串成一条连续对话**——用户说一句，技能理解意图并调用对应内核能力，任务完成时还能自动建议记账。
+主动记账与对话式诊断、报告**串成一条连续对话**——用户说一句，技能理解意图并调用对应内核能力，任务完成时还能自动建议记账。
 
-由 `scripts/conversation.py` 提供，纯新增、**不改 qa / report_engine / ledger_agent 一行**：
+由 `scripts/conversation.py` 提供：
 
 - **意图路由（classify + handle）**：把一句话归到 记账 / 确认 / 取消 / 生成摘要 / 生成完整报告 / 待自动化建议 / 追问 等意图，再分派给对应内核能力。
 - **自然语言记账**：说「记一笔 周报生成 花了1800 token 5分钟」，自动解析类型与成本，用该类型历史均值预填 baseline 估计并预览；你回「确认」才写回（ledger_agent 内部仍是 dry-run + 备份）。
@@ -258,39 +258,37 @@ v0.3 给了「主动记账」的原子能力；v0.4 把它们与对话式诊断�
 
 交互示例：`python conversation.py <examples/ledger.json>` 进入 REPL；也可在 Python 里 `handle(ledger, text, state)` 单轮调用，便于 Skill / 对话 UI 集成（state 保存待确认条目）。
 
-> 这就是 v0.1 三层解耦的复利：v0.4 没有碰任何既有三层，只是新增一个消费它们的编排层，却让「说一句就记一笔、记完接着问」成为单一体验。
+## 类型字典消歧
 
-## 类型字典消歧（v0.5）
+自然语言里的任务类型名需要**准确落到账本标准名**——靠「子串模糊匹配」会有歧义：说「生成了周报」只抓到短词「周报」，若账本里同时有「周报生成」和「周报审核」就会误判；全新类型也容易被误判。
 
-v0.4 的 `_detect_type` 靠「子串模糊匹配」把自然语言里的类型落到账本标准名——隐患是：说「生成了周报」只抓到短词「周报」，若账本里同时有「周报生成」和「周报审核」就会歧义；全新类型也容易被误判。
-
-v0.5 引入 **`scripts/type_registry.json` 类型字典**（标准名 ↔ 别名/关键词映射），让类型识别从「猜」变成「查表」：
+为此引入 **`scripts/type_registry.json` 类型字典**（标准名 ↔ 别名/关键词映射），让类型识别从「猜」变成「查表」：
 
 - `_detect_type` 匹配优先级：① 账本已知标准类型精确出现 → ② 类型字典标准名/别名命中 → ③ 短语抓取（记账词或完成动词后跟类型名）+ 字典模糊匹配 → ④ 都无命中则作为**全新类型候选**返回（预览时提示你确认，并建议在字典补别名）。
-- 词典缺失/损坏时自动降级为空字典（退化为 v0.4 行为），不影响其他功能。
-- 新增类型时，只需在 `type_registry.json` 的 `types` 里加一个标准名 + 别名列表，即可让以后的自然语言记账准确识别——**仍不改 qa / report_engine / ledger_agent / diagnose 一行**。
+- 词典缺失/损坏时自动降级为空字典（退化为无字典的模糊匹配），不影响其他功能。
+- 新增类型时，只需在 `type_registry.json` 的 `types` 里加一个标准名 + 别名列表，即可让以后的自然语言记账准确识别。
 
 实地验证脚本见 `tests/test_v05.py`：`python tests/test_v05.py` 自带临时账本跑完整流程，断言类型字典消歧正确、三层数字同源一致。
 
-## Skill 触发流（v0.6 接宿主对话事件）
+## Skill 触发流（宿主对话事件）
 
-v0.5 以前，记账要等**用户主动说**「记一笔」或「我刚生成了周报」。v0.6 再往前一步：**让「用户完成一次任务」这件事本身自动建议记账**——不必再记着去敲那句命令。
+**让「用户完成一次任务」这件事本身自动建议记账**——不必再记着去敲那句命令。
 
-由 `scripts/skill_bridge.py` 提供，纯新增、**不改 diagnose / qa / report_engine / ledger_agent / conversation 一行**：
+由 `scripts/skill_bridge.py` 提供：
 
 - **完成信号识别（is_completion_event）**：一句话里含「生成了 / 做好了 / 写完了 / 交付了 …」等完成动词即视为「任务完成事件」。再细分信心：动词+成本数字 = high（直接给完整建议）；仅动词、无成本 = medium（仍触发，并提示补成本）；纯闲聊/问答 = low（不触发，交普通对话）。
 - **事件桥接（on_conversation_event）**：把一条**宿主对话事件**（如用户说「我刚生成了周报，花了1800 token 5分钟」）翻译成 `conversation.handle()` 的调用，**内部暂存待记账条目到 state["pending"]**，返回结构化 `TriggerResult`（是否触发 / 建议文案 / 待记账类型 / 信心），供 Skill / UI 渲染成「要不要记一笔？」卡片。
 - **类型字典兜底（_lenient_type）**：对于「写完了那份PPT」这类**没给成本、且别名大小写不符**的完成句，对话层 `_detect_type` 认不出类型时，桥接层用类型字典做大小写不敏感兜底匹配，仍能落到标准名「PPT制作」。
-- **确认才写回（安全默认不变）**：触发流只「建议」，绝不在用户确认前落盘。用户回「确认」交给普通对话流 `handle("确认", state)` 写回——与 v0.4/v0.5 完全一致。
+- **确认才写回（安全默认不变）**：触发流只「建议」，绝不在用户确认前落盘。用户回「确认」交给普通对话流 `handle("确认", state)` 写回。
 
-> 本模块**不绑定任何具体平台**（天禧 / OpenClaw 皆可），只认通用的「对话事件」契约，可直接复用到比赛仓库。
+> 本模块**平台无关**：只认通用的「对话事件」契约，天禧 / OpenClaw 等宿主均可接入。
 
 宿主技能侧集成示例：
 
 ```python
 from skill_bridge import on_conversation_event
 state = {}
-# 宿主在完成一次办公任务后，把真实用量随事件一并传来（v0.7 起支持 event["cost"]）
+# 宿主在完成一次办公任务后，把真实用量随事件一并传来（事件携带 event["cost"]）
 res = on_conversation_event("examples/ledger.json", {
     "role": "user", "text": "我刚生成了周报",
     "cost": {"skill_tokens": 1800, "skill_minutes": 5},
@@ -299,28 +297,25 @@ if res.triggered:
     show_suggestion(res.suggestion)   # 渲染「建议记账：周报生成 … 确认？」
 ```
 
-> 这就是 v0.1 三层解耦 + v0.4 编排层 + v0.5 类型字典的又一次复利：v0.6 **只新增一个消费 `conversation.handle()` 的「触发适配器」**，把「人敲 CLI」换成「对话事件驱动」，内核与三层外壳零改动。
-
 实地验证脚本见 `tests/test_v06.py`：`python tests/test_v06.py` 自带临时账本，断言高/中信心完成事件触发、非完成事件不触发、触发默认 dry-run 不写账本、确认后写回且三层数字同源一致。
 
-## 真实闭环 + 去品牌化（v0.7）
+## 真实闭环（宿主用量事件接入）
 
-v0.6 的触发流已能自动建议记账，但成本仍需**用户自报**（"花了1800 token"）。v0.7 再往前一步：**让宿主平台把任务的真实用量直接随事件传进来**，把"提效"从"自报"变成"实测"——这才是比赛方案 Option B 真正想要的"对比笨办法 vs 本技能"的硬数据。
+成本默认由**用户自报**（"花了1800 token"），也支持**让宿主平台把任务的真实用量直接随事件传进来**，把"提效"从"自报"变成"实测"——即"对比笨办法 vs 本技能"的硬数据来源。
 
 由 `scripts/skill_bridge.py`（升级）与 `scripts/host_hook.py`（新增）共同提供，**内核与三层外壳 + 编排层仍零改动**：
 
 - **真实成本捕获（event["cost"]）**：宿主在完成一次办公任务后，可在事件里带上 `{"skill_tokens": N, "skill_minutes": M}`。桥接层优先采用这个**实测值**，而非从自然语言里解析数字；`TriggerResult.cost_source` 标记为 `"event"`（自报则为 `"text"`），供 Skill / UI 标注"本技能实测消耗"。
 - **结构化完成标志（event["completed"]）**：宿主也能显式声明"任务已完成"（`completed=True`），优先级高于文本里的完成动词，便于平台把"产出物落地"这个动作直接映射成记账建议。
 - **宿主钩子示例（host_hook.py）**：一个**平台无关**的适配器，演示宿主如何把完成事件归一化成通用 `event` dict（`build_completion_event`）并接进 `on_conversation_event`（`on_task_completed`）。它**不 import 任何平台 SDK、不发网络请求、不硬编码密钥**，满足 OpenClaw / 天禧 安全红线；平台-specific 的 glue 由平台侧实现。
-- **去品牌化**：`skill_bridge` 不再绑定具体宿主平台，可同时服务 天禧 / OpenClaw；比赛仓库可直接复用内核，无需改造。
 
-> 真实闭环落地证据：宿主回报 `skill_tokens=1800` 的事件经触发→确认后，写回账本的条目 `skill_tokens` 即为 1800（非用户手敲），且确认消息 / 内核 Diagnosis / 摘要报告三处节省率完全一致（v0.7 测试已断言）。
+> 落地保证：宿主回报 `skill_tokens=1800` 的事件经触发→确认后，写回账本的条目 `skill_tokens` 即为 1800（非用户手敲），且确认消息 / 内核 Diagnosis / 摘要报告三处节省率完全一致（`tests/test_v07.py` 已断言）。
 
-实地验证脚本见 `tests/test_v07.py`：`python tests/test_v07.py` 自带临时账本，断言真实用量事件触发且 `cost_source=event`、确认后写回采用宿主真实用量、三层数字同源、源码已去品牌化（无具体平台绑定措辞）；`python scripts/host_hook.py --demo` 可看宿主完成事件如何触发记账建议。
+实地验证脚本见 `tests/test_v07.py`：`python tests/test_v07.py` 自带临时账本，断言真实用量事件触发且 `cost_source=event`、确认后写回采用宿主真实用量、三层数字同源、源码未绑定具体平台；`python scripts/host_hook.py --demo` 可看宿主完成事件如何触发记账建议。
 
-## 任务执行引擎（方向 B：既做又记）
+## 任务执行引擎（既做又记）
 
-v0.9.5 起，技能不再只度量——它**直接把办公任务做成可交付物**，并顺手把这笔账记回 ledger。由 `scripts/executor.py` 提供，**纯标准库、零依赖、不联网、不调密钥**。
+技能**直接把办公任务做成可交付物**，并顺手把这笔账记回 ledger。由 `scripts/executor.py` 提供，**纯标准库、零依赖、不联网、不调密钥**。
 
 支持的任务类型与做法：
 
@@ -358,7 +353,7 @@ python scripts/executor.py --type 周报生成 --input 本周要点.txt \
 
 > 闭环设计：执行产出后调用 `ledger_agent.run_long_chain` 自动建议记账，**复用 P0 写回护栏**——未补「笨办法」baseline 时拒绝写回，不污染账本。这样「做」和「记」合成一步，省了多少自动可复盘。
 
-宿主技能侧集成（天禧 / OpenClaw 皆可）：用户说「帮我写周报」→ 宿主把原始要点交给 `executor.execute("周报生成", text)` 拿到 Markdown → 渲染给用户，并带 `event["cost"]` 调 `propose_ledger` 记回。宿主钩子 `scripts/host_hook.py` 提供 `on_executor_completed(ledger_path, task_type, event, apply)`，把 `executor` 完成事件里的真实用量（`event["cost"]` 中的 `skill_tokens/skill_minutes`）直接记回 ledger，与 v0.7 宿主完成事件形态一致，无需重复写对接代码。
+宿主技能侧集成（天禧 / OpenClaw 皆可）：用户说「帮我写周报」→ 宿主把原始要点交给 `executor.execute("周报生成", text)` 拿到 Markdown → 渲染给用户，并带 `event["cost"]` 调 `propose_ledger` 记回。宿主钩子 `scripts/host_hook.py` 提供 `on_executor_completed(ledger_path, task_type, event, apply)`，把 `executor` 完成事件里的真实用量（`event["cost"]` 中的 `skill_tokens/skill_minutes`）直接记回 ledger，无需重复写对接代码。
 
 ## 设计与合规
 
@@ -366,7 +361,8 @@ python scripts/executor.py --type 周报生成 --input 本周要点.txt \
 - **无硬编码密钥**：脚本不读取任何 API Key / Token。
 - **数据最小化**：只处理你主动提供的文件，不扫描技能目录以外的系统文件。
 - **推荐 Skill 的真实来源**：报告中的「推荐 Skill」由**内置静态规则表**按任务类型本地匹配产生，不联网获取；推荐条目的节省数字与来源链接均引自第三方项目的公开自述（README / benchmark），**未经本技能实测验证**，仅供参考。本技能不代为安装任何第三方 Skill，也不会生成任何安装命令——是否安装、如何安装由你自行判断。
-- **开源协议**：MIT，可自由学习、修改、再分发。
+- **开源协议**：MIT，可自由学习、修改、再分发（部分技能市场平台统一采用 MIT-0 条款发布，属平台侧协议，不改变本仓库的 MIT 授权）。
+- **发布者自用脚本（不随分发包提供）**：`scripts/clawhub_client.py` / `scripts/skillhub_client.py`（技能市场上传客户端，发布者自己调 CLI 上传用）、`scripts/security_preflight.py`（开发期合规预检）、`tools/`（打包与站点构建脚本）、`tests/` 与开发期 requirements / `pytest.ini`，均为**发布与开发自用**内容，**不属于本技能的可用能力**；核心执行 / 度量 / 报告链路不 import、不依赖它们，缺失时全部功能不受影响。
 
 ## 范围说明（Non-goals）
 

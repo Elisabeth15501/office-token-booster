@@ -1,0 +1,22 @@
+# ClawHub 分发包裁剪（仅为该渠道裁剪，不影响 GitHub / 天禧 分发）
+
+# 1) 平台条款冲突：ClawHub 全站强制 MIT-0，不支持按技能覆盖；仓库 LICENSE 为 MIT
+LICENSE
+
+# 2) 发布者自用（发布者自己调市场 CLI 上传用；核心能力不调用，SKILL.md 也未将其声明为用户能力）
+scripts/clawhub_client.py
+scripts/skillhub_client.py
+
+# 3) 发布者自用：开发期合规预检脚本（静态扫描器，含联网/危险模式特征串；非用户能力）
+scripts/security_preflight.py
+
+# 4) 开发期配置与测试产物（用户能力里无测试/预检项）
+tests/
+pytest.ini
+requirements-dev.txt
+requirements-test.txt
+scripts/test_recommendation.py
+docs/allure-labels.md
+
+# 5) 发布者自用：打包 / 站点构建 / 测试报告渲染脚本（仓库开发流程用，非用户能力）
+tools/

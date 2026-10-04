@@ -142,7 +142,7 @@ def test_v09_skillmd_honest_scope():
         sec = _section(text, "能做什么（真实范围）")
         attach_text(sec or "（未找到小节）", "能做什么表")
         assert sec, "应存在『能做什么（真实范围）』小节"
-        assert "任务执行（方向 B）" in sec, "能做什么表应列出已落地的任务执行能力"
+        assert "| 任务执行 |" in sec, "能做什么表应列出已落地的任务执行能力"
         assert "自动记账" in sec, "执行能力应说明自动记账闭环"
 
 
