@@ -9,6 +9,7 @@
 - 信息：CHANGELOG 描述历史修复时嵌入了可复制执行的命令形态
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -135,3 +136,51 @@ class TestDocsNoExecutableDownloadCommands:
         assert "curl |" not in text
         assert "| bash" not in text
         assert "wget |" not in text
+
+
+class TestDocsNoSecretLiteralPattern:
+    """高危整改：发行文档不得出现「敏感名 + 赋值号 + 字面量」形态。
+
+    起因：ClawHub 静态扫描（SkillSpector）对 ``CHANGELOG.md`` 报
+    ``suspicious.exposed_secret_literal``（Critical）——原文在枚举
+    ``security_preflight.py`` 自身的 R3 检测模式，写成了一串
+    「敏感名=值」的链式形态，被判定为硬编码凭据。
+
+    本测试锁定「文档描述检测规则时不能用赋值形态」，避免同类告警在
+    每次改 CHANGELOG 时复发（复发一次 = 一次新版本 + 一次重新审核）。
+    本文件位于 tests/，不随分发包发布，故其自身正则不会成为扫描面。
+    """
+
+    DOCS = [
+        "CHANGELOG.md", "SKILL.md", "README.md", "QUICKSTART.md",
+        "RELEASE_NOTES.md", "usage-examples.md", "docs/portability-contract.md",
+    ]
+    # 敏感名 + 赋值号 + 至少 4 位非空白字面量
+    ASSIGN = re.compile(
+        r"(?i)\b(?:api[_-]?key|secret|access[_-]?token|auth[_-]?token"
+        r"|private[_-]?key|token|pwd|password|passwd|credential)s?\s*[=:]\s*\S{4,}"
+    )
+    # 已知凭据字面量前缀（长度阈值与常见扫描器一致）
+    LITERALS = {
+        "openai-style key": re.compile(r"\bsk-[A-Za-z0-9_\-]{16,}"),
+        "github pat": re.compile(r"\bgh[pousr]_[A-Za-z0-9]{16,}"),
+        "aws access key": re.compile(r"\bAKIA[0-9A-Z]{16}"),
+        "tencent secret id": re.compile(r"\bAKID[A-Za-z0-9]{16,}"),
+        "slack token": re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}"),
+    }
+
+    @pytest.mark.parametrize("doc", DOCS)
+    def test_no_secret_assignment_literal(self, doc):
+        p = ROOT / doc
+        if not p.is_file():
+            pytest.skip(f"{doc} 不存在")
+        for lineno, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            hit = self.ASSIGN.search(line)
+            assert not hit, (
+                f"{doc}:{lineno} 出现「敏感名+赋值+字面量」形态，"
+                f"会被 ClawHub 静态扫描判为 suspicious.exposed_secret_literal：{hit.group()!r}"
+            )
+            for name, rx in self.LITERALS.items():
+                m = rx.search(line)
+                assert not m, f"{doc}:{lineno} 出现疑似 {name} 字面量：{m.group()[:12]!r}"
+

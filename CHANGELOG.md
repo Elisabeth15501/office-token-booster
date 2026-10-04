@@ -4,6 +4,25 @@
 
 ---
 
+## v1.0.5 — ClawHub 高危扫描整改：`suspicious.exposed_secret_literal`（2026-10-05）
+
+针对 ClawHub 安全审计页 SkillSpector 静态分析的唯一一条 **Critical** 发现。**仅文档文本修正，零代码行为变更**（测试基线 186 passed / 3 skipped，另新增 7 例文档守卫）。
+
+### 修复
+
+- **`CHANGELOG.md` v0.9.9 条目（两处）**：原文在枚举 `security_preflight.py` 自身的 R3 检测模式时，写成了「敏感名=值」的链式形态（如 `api_key=` 后接一串模式名），被静态扫描判定为**硬编码 API 密钥/令牌**。改为纯散文描述（「敏感名紧跟赋值号」的写法检测）并把完整模式清单指向 `scripts/security_preflight.py` 为准——**信息量不减，且不再呈现为凭据赋值**。
+
+### 新增
+
+- **`tests/test_v102_security_fix.py::TestDocsNoSecretLiteralPattern`**：对 7 个随包文档做「敏感名+赋值+字面量」与 5 类已知凭据前缀的回归守卫，防止以后改 CHANGELOG 时同类 Critical 复发（复发一次 = 一次新版本 + 一次重新审核）。已用修复前原文反向验证：旧文两行均被捕获，新文通过。
+
+### 说明
+
+- 该发现属**「语义上非真实凭据、但形式上确实命中扫描规则」**：仓库内无任何真实密钥（发布清单 23 文件凭据扫描命中 0），命中源是文档对**检测规则本身**的描述。
+- 未采用「把文件排除出发布包」的规避方式——CHANGELOG 是用户需要的能力变更记录，排除它等于制造声明缺口；正确做法是让文本不再长得像凭据。
+
+---
+
 ## v1.0.4 — 文档叙述清理 + ClawHub 分发裁剪（2026-10-04）
 
 纯文档 / 打包面变更，**零代码行为变更**（全量测试基线 186 passed / 3 skipped 不变）。
@@ -180,7 +199,7 @@
 - **[C2] 加固安全预检红线（CI 闸门此前名不副实）**：
   - R1 补 `__import__("os"|"subprocess"|"builtins"|...)` 危险目标模块（旧正则仅认 `eval/exec/os.system/subprocess`，`__import__("os").system(...)` 可等价绕过）。仅匹配危险目标，避免误伤 `print(..., file=__import__("sys").stderr)` 等良性用法。
   - R2 将 `socket.socket` 扩为 `socket.`（覆盖 `create_connection`/`connect`），并补 `urllib3/pycurl/grpc/websocket/httplib2` 等客户端（旧正则漏掉裸 socket 联网）。
-  - R3 放宽密钥长度门槛（8→4 字符）并新增 `api_key=/access_token=/client_secret=/private_key=/token=/pwd=` 赋值模式检测。
+  - R3 放宽密钥长度门槛（8→4 字符），并新增对「api key / access token / client secret / private key / token / pwd」等**敏感名紧跟赋值号**的写法检测（完整模式清单以 `scripts/security_preflight.py` 的 R3 规则为准）。
   - **文档去夸大**：模块 docstring 明确这是「轻量静态启发式，非安全保证」，可被字符串拆分/环境变量/编码绕过，仅拦低级手滑，不在承诺中称「零风险」。
 - **[R1] 会议纪要 `_DECISION_RE` 移除过宽关键词「确认」**（极常见中文词，导致「请确认参会」等行被误判为核心结论）。
 - **[R3/R4] 清理死代码**：删除 `render_ppt_outline` 从未使用的 `chunks` 变量；移除 `executor.py` 未使用的 `field` 导入。
@@ -213,7 +232,7 @@
 - `conversation._do_execute`：渲染后存入 `state["pending"]`，提示预览 + 要 baseline，确认才落盘。
 
 ### 执行层安全预检（四红线）+ CI 闸门
-- 新增 `scripts/security_preflight.py`：扫描 `.py` 文件检测 R1 危险执行（`eval/exec/os.system/subprocess`）、R2 网络外发（`urllib.request/requests/http.client/socket` 等）、R3 硬编码密钥（`AKIA*/sk-/ghp_/xox*/JWT/password=/secret=`）、R4 `html.escape` 转义（仅告警）。
+- 新增 `scripts/security_preflight.py`：扫描 `.py` 文件检测 R1 危险执行（`eval` / `exec` / `os.system` / `subprocess`）、R2 网络外发（urllib、requests、http.client、socket 等客户端）、R3 硬编码密钥（云厂商 AKIA 前缀、`sk-` / `ghp_` / `xox` 风格令牌、JWT，以及各类 password / secret 赋值写法）、R4 `html.escape` 转义（仅告警）。
 - 白名单：`security_preflight.py` / `test_security_preflight.py` 豁免 R1；`skillhub_client.py` / `clawhub_client.py` / `security_preflight.py` / `test_security_preflight.py` 豁免 R2（设计内允许联网的搜索客户端）。
 - `.github/workflows/ci.yml` 新增 `security` job，在 `deploy-pages` 前跑 `python scripts/security_preflight.py scripts`，**须 0 红线才放行**。
 - 当前 `scripts/` 实测通过预检（0 红线，仅 4 处 R4 转义告警）。
