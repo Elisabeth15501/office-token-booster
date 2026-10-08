@@ -137,25 +137,92 @@ def propose_automation_targets(diag, top_n=3):
 # 写回模板（原子 + 备份 + 默认 dry-run）
 # ─────────────────────────────────────────────────────────────
 
+_BACKUP_KEEP = 10  # 时间戳备份保留份数上限（超出淘汰最旧），避免长期使用无界堆积
+
+
+def _validate_entry(entry):
+    """写回前校验单条 entry（**只校验不改写**，保持调用方传入的原值）。
+
+    允许 `{}` 与字段缺失（下游 diagnose 会按缺省 0 处理）；
+    字段存在但无法识别为整数时抛错——宁可拒绝写回，也不把损坏数据落盘。
+    """
+    if not isinstance(entry, dict):
+        raise ValueError(f"entry 必须是 dict，实际为 {type(entry).__name__}")
+    for key in ("baseline_tokens", "skill_tokens", "baseline_minutes", "skill_minutes"):
+        if key not in entry:
+            continue
+        val = entry[key]
+        if val is None or val == "":
+            continue
+        try:
+            int(val)
+        except (TypeError, ValueError):
+            raise ValueError(f"entry[{key}]={val!r} 无法识别为整数，拒绝写回") from None
+    return entry
+
+
+def _load_or_empty(p: Path) -> dict:
+    """读取账本；文件缺失 / 损坏 / 结构非 dict 时退回空账本。
+
+    原文件内容不会丢——损坏场景下的原文会在备份步骤里留存为 .bak。
+    """
+    if not p.is_file():
+        return {"tasks": []}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            ledger = json.load(f)
+    except (json.JSONDecodeError, ValueError):
+        ledger = {"tasks": []}
+    return ledger if isinstance(ledger, dict) else {"tasks": []}
+
+
+def _prune_backups(p: Path, keep: int = _BACKUP_KEEP) -> int:
+    """只保留最近 keep 份时间戳备份，淘汰更旧的。返回删除数量。
+
+    备份文件名形如 ledger.json.20260812T142501123456.bak，按名排序即按时间排序。
+    清理失败不阻断主流程：此时备份仍在，宁可堆积也不要因清理异常丢掉写回结果。
+    """
+    backups = sorted(p.parent.glob(f"{p.name}.*.bak"))
+    removed = 0
+    for old in (backups[:-keep] if keep > 0 else []):
+        try:
+            old.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
+def _write_ledger_atomic(p: Path, ledger: dict, backup: bool = True):
+    """备份 + 原子替换写盘（append_entry / append_entries 共用单一写入口）。
+
+    返回 backup_path_or_None。备份为独立时间戳文件，可回滚到任意留存版本；
+    写盘成功后按 _BACKUP_KEEP 淘汰旧备份，控制目录体积。
+    """
+    backup_path = None
+    if backup and p.is_file():
+        ts = datetime.now().strftime("%Y%m%dT%H%M%S%f")
+        backup_path = Path(str(p) + f".{ts}.bak")
+        backup_path.write_text(p.read_text(encoding="utf-8"), encoding="utf-8")
+
+    tmp = Path(str(p) + ".tmp")
+    tmp.write_text(json.dumps(ledger, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, p)  # 原子替换（Windows 也安全）
+    _prune_backups(p)
+    return backup_path
+
+
 def append_entry(ledger_path, entry, *, backup=True, dry_run=False):
     """把 entry 追加进 ledger 的 tasks 数组。
 
     - dry_run=True：只返回「将会写成的 ledger」dict，不碰磁盘（CLI 默认）。
-    - dry_run=False：先备份原文件为 <path>.bak，再原子写入（写临时文件后 os.replace）。
+    - dry_run=False：先备份原文件为 <path>.<时间戳>.bak，再原子写入。
+    - entry 字段非法（数值不可识别）时**抛错拒写**，不污染账本。
     返回 (new_ledger_dict, backup_path_or_None)。
     """
+    _validate_entry(entry)
     p = Path(ledger_path)
-    if p.is_file():
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                ledger = json.load(f)
-        except (json.JSONDecodeError, ValueError):
-            # 损坏的账本：从空账本重建，原文件会在下方备份步骤留存（不丢数据）
-            ledger = {"tasks": []}
-        if not isinstance(ledger, dict):
-            ledger = {"tasks": []}
-    else:
-        ledger = {"tasks": []}
+    ledger = _load_or_empty(p)
 
     tasks = ledger.get("tasks", [])
     if not isinstance(tasks, list):
@@ -165,19 +232,7 @@ def append_entry(ledger_path, entry, *, backup=True, dry_run=False):
 
     if dry_run:
         return ledger, None
-
-    backup_path = None
-    if backup and p.is_file():
-        # 时间戳备份（修复 M2）：每次 apply 生成独立 .bak，连续写回不再覆盖首备，
-        # 可回滚到任意历史版本。文件名形如 ledger.json.20260812T142501123456.bak
-        ts = datetime.now().strftime("%Y%m%dT%H%M%S%f")
-        backup_path = Path(str(p) + f".{ts}.bak")
-        backup_path.write_text(p.read_text(encoding="utf-8"), encoding="utf-8")
-
-    tmp = Path(str(p) + ".tmp")
-    tmp.write_text(json.dumps(ledger, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, p)  # 原子替换（Windows 也安全）
-    return ledger, backup_path
+    return ledger, _write_ledger_atomic(p, ledger, backup=backup)
 
 
 def append_entries(ledger_path, entries, *, backup=True, dry_run=False):
@@ -186,17 +241,10 @@ def append_entries(ledger_path, entries, *, backup=True, dry_run=False):
     与 append_entry 同语义：dry_run 只返回新 ledger dict；否则先备份再原子写入。
     返回 (new_ledger_dict, backup_path_or_None)。
     """
+    for entry in entries:
+        _validate_entry(entry)
     p = Path(ledger_path)
-    if p.is_file():
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                ledger = json.load(f)
-        except (json.JSONDecodeError, ValueError):
-            ledger = {"tasks": []}
-        if not isinstance(ledger, dict):
-            ledger = {"tasks": []}
-    else:
-        ledger = {"tasks": []}
+    ledger = _load_or_empty(p)
 
     tasks = ledger.get("tasks", [])
     if not isinstance(tasks, list):
@@ -206,17 +254,7 @@ def append_entries(ledger_path, entries, *, backup=True, dry_run=False):
 
     if dry_run:
         return ledger, None
-
-    backup_path = None
-    if backup and p.is_file():
-        ts = datetime.now().strftime("%Y%m%dT%H%M%S%f")
-        backup_path = Path(str(p) + f".{ts}.bak")
-        backup_path.write_text(p.read_text(encoding="utf-8"), encoding="utf-8")
-
-    tmp = Path(str(p) + ".tmp")
-    tmp.write_text(json.dumps(ledger, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, p)
-    return ledger, backup_path
+    return ledger, _write_ledger_atomic(p, ledger, backup=backup)
 
 
 def import_host_usage(ledger_path, days=7, provider=None, *,

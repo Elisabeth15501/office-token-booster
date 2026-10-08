@@ -4,13 +4,34 @@
 
 ---
 
+## v1.0.6 — 安全优化方案 P0 落地（权限收缩 / 扫描边界 / 写回加固 / 凭据面文本）（2026-10-08）
+
+按 ClawHub 安全审计报告（Findings 33）归并出的 P0 项落地。**含两处行为加固**，其余为声明修正。
+
+### 修复（必须项）
+
+- **权限过度声明**：frontmatter 与 `config.yaml` 的 `tools` 移除 `shell`（实测发布面无子进程 / 系统命令 / 动态求值执行），仅保留 `filesystem`；`permissions` 由 `["."]` 改为「用户显式提供/指定的路径」，并注明不做目录遍历式扫描。
+- **宿主用量读取收窄（隐私）**：`host_cost.LocalProvider` 由无边界 `rglob("*")` 改为 `_iter_trace_files()` **有界枚举**——深度上限 3 层、单次文件数上限 2000、只认 `.json/.jsonl/.log`（原实现还接受无后缀文件）、**跳过符号链接**（防止链接指向目录外）。保留对 `traces/<session_id>/trace_<hash>.json` 嵌套形态的支持（回归测试锁定）。
+- **账本写回加固**：`append_entry` / `append_entries` 收敛到单一写入口 `_write_ledger_atomic()`，新增①`_validate_entry()` 写回前校验（数值字段不可识别则**拒写**，容许空条目与字段缺失，不改写调用方原值）②`_BACKUP_KEEP = 10` **备份配额**（写盘后淘汰更旧的时间戳备份，避免无界堆积）③`_load_or_empty()` 统一异常账本降级。
+- **凭据面文本（第二次自伤）**：v1.0.5 修复说明里的赋值形态已改写为纯散文；v0.9.9 条目中的动态导入 / socket 前缀可执行形态改为散文描述；`RELEASE_NOTES` 中同类扫描结论表述一并改写。
+
+### 声明修正（口径与实现对齐）
+
+- `SKILL.md` 「数据最小化」由「不扫描技能目录以外的系统文件」改为准确语义：**只读写显式提供/指定的路径，不做目录遍历式扫描**；并新增三条独立条目——宿主用量接入需显式触发、宿主数据读取范围（只读 / 限定后缀与上限 / 只解析五类字段 / 不读提示词正文）、技能内部不执行系统命令（命令行由宿主或用户调用）。
+
+### 测试
+
+- `tests/test_v102_security_fix.py` 新增 `TestHostUsageScanBounded`（深度上限 / 后缀白名单 / 符号链接跳过）、`TestLedgerWriteHardening`（条目校验 / 备份配额 / 拒写不改文件），并加严文档守卫：补 `ASSIGN_INLINE`（**反引号包裹的赋值形态**——这正是 v1.0.5 漏检的形态）与 `EXECUTABLE`（动态导入 / socket 前缀 / 系统命令）两类检查，覆盖面从 7 篇扩到 9 篇随包文档。
+
+---
+
 ## v1.0.5 — ClawHub 高危扫描整改：`suspicious.exposed_secret_literal`（2026-10-05）
 
 针对 ClawHub 安全审计页 SkillSpector 静态分析的唯一一条 **Critical** 发现。**仅文档文本修正，零代码行为变更**（测试基线 186 passed / 3 skipped，另新增 7 例文档守卫）。
 
 ### 修复
 
-- **`CHANGELOG.md` v0.9.9 条目（两处）**：原文在枚举 `security_preflight.py` 自身的 R3 检测模式时，写成了「敏感名=值」的链式形态（如 `api_key=` 后接一串模式名），被静态扫描判定为**硬编码 API 密钥/令牌**。改为纯散文描述（「敏感名紧跟赋值号」的写法检测）并把完整模式清单指向 `scripts/security_preflight.py` 为准——**信息量不减，且不再呈现为凭据赋值**。
+- **`CHANGELOG.md` v0.9.9 条目（两处）**：原文在枚举 `security_preflight.py` 自身的 R3 检测模式时，把模式写成了「敏感名紧接等号再跟一串模式名」的链式形态，被静态扫描判定为**硬编码 API 密钥/令牌**。改为纯散文描述（「敏感名紧跟赋值号」的写法检测）并把完整模式清单指向 `scripts/security_preflight.py` 为准——**信息量不减，且不再呈现为凭据赋值**。
 
 ### 新增
 
@@ -197,8 +218,8 @@
 
 - **[C1] 修复确认写回静默丢弃 skill 成本（数据丢失）**：`conversation` 的 `confirm` 分支此前用「base_t 非空即不写回 skill」的互斥逻辑，导致同句同时给 skill+baseline（如 `确认 花了1800 token 5分钟 baseline 12000 token 25分钟`）时，用户显式输入的 skill 成本被吃掉、账本只记 baseline。改为**分段解析**——按首个 baseline 触发词切分，触发词之前=skill 段、之后=baseline 段，各自独立 `_parse_numbers`，互不吞。回归测试 `test_execute_confirm_keeps_skill_cost_with_baseline` 锁定 `skill_tokens=1800 / skill_minutes=5 / baseline=12000/25`。
 - **[C2] 加固安全预检红线（CI 闸门此前名不副实）**：
-  - R1 补 `__import__("os"|"subprocess"|"builtins"|...)` 危险目标模块（旧正则仅认 `eval/exec/os.system/subprocess`，`__import__("os").system(...)` 可等价绕过）。仅匹配危险目标，避免误伤 `print(..., file=__import__("sys").stderr)` 等良性用法。
-  - R2 将 `socket.socket` 扩为 `socket.`（覆盖 `create_connection`/`connect`），并补 `urllib3/pycurl/grpc/websocket/httplib2` 等客户端（旧正则漏掉裸 socket 联网）。
+  - R1 补「动态导入危险目标模块」的检测（旧正则仅认常见的 eval / exec / 系统调用三类，动态导入可等价绕过）。仅匹配危险目标模块名，避免误伤「打印到标准错误流」等良性用法。
+  - R2 把 socket 相关检测从单一构造函数名扩展为整个 socket 模块前缀（覆盖建连与连接等入口），并补 urllib3 / pycurl / grpc / websocket / httplib2 等客户端（旧正则漏掉裸 socket 联网）。
   - R3 放宽密钥长度门槛（8→4 字符），并新增对「api key / access token / client secret / private key / token / pwd」等**敏感名紧跟赋值号**的写法检测（完整模式清单以 `scripts/security_preflight.py` 的 R3 规则为准）。
   - **文档去夸大**：模块 docstring 明确这是「轻量静态启发式，非安全保证」，可被字符串拆分/环境变量/编码绕过，仅拦低级手滑，不在承诺中称「零风险」。
 - **[R1] 会议纪要 `_DECISION_RE` 移除过宽关键词「确认」**（极常见中文词，导致「请确认参会」等行被误判为核心结论）。
@@ -232,7 +253,7 @@
 - `conversation._do_execute`：渲染后存入 `state["pending"]`，提示预览 + 要 baseline，确认才落盘。
 
 ### 执行层安全预检（四红线）+ CI 闸门
-- 新增 `scripts/security_preflight.py`：扫描 `.py` 文件检测 R1 危险执行（`eval` / `exec` / `os.system` / `subprocess`）、R2 网络外发（urllib、requests、http.client、socket 等客户端）、R3 硬编码密钥（云厂商 AKIA 前缀、`sk-` / `ghp_` / `xox` 风格令牌、JWT，以及各类 password / secret 赋值写法）、R4 `html.escape` 转义（仅告警）。
+- 新增 `scripts/security_preflight.py`：扫描 `.py` 文件检测 R1 危险执行（求值执行、系统命令调用、动态导入）、R2 网络外发（常见 HTTP 客户端与原始 socket 调用）、R3 硬编码密钥（云厂商 AKIA 前缀、`sk-` / `ghp_` / `xox` 风格令牌、JWT，以及各类 password / secret 赋值写法）、R4 `html.escape` 转义（仅告警）。
 - 白名单：`security_preflight.py` / `test_security_preflight.py` 豁免 R1；`skillhub_client.py` / `clawhub_client.py` / `security_preflight.py` / `test_security_preflight.py` 豁免 R2（设计内允许联网的搜索客户端）。
 - `.github/workflows/ci.yml` 新增 `security` job，在 `deploy-pages` 前跑 `python scripts/security_preflight.py scripts`，**须 0 红线才放行**。
 - 当前 `scripts/` 实测通过预检（0 红线，仅 4 处 R4 转义告警）。

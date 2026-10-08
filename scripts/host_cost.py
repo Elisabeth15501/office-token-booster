@@ -11,6 +11,9 @@
                                  在此升级为可单测的一等公民）。
     - LocalProvider  —— 只读本机宿主 的本地用量数据
                                  （~/.workbuddy/traces、workbuddy.db、usage-log.json）。
+                                 仅在用户显式触发「导入宿主用量」时启用；读取**有界**
+                                 （深度上限 3 层、文件数上限 2000、只认 .json/.jsonl/.log、
+                                 跳过符号链接），不遍历目录外任何路径。
 - 全程纯标准库、无网络、无硬编码密钥、无副作用（只读 + 纯解析）。
 - 任何解析失败都降级为「跳过该条 / 返回空列表」，绝不抛异常炸掉调用方。
 
@@ -136,6 +139,38 @@ _TRACES_DIR = _LOCAL_ROOT / "traces"
 _DB_PATH = _LOCAL_ROOT / "workbuddy.db"
 _USAGE_LOG = _LOCAL_ROOT / "usage-log.json"
 
+# 扫描边界（隐私护栏）：宿主目录虽由用户显式授权读取，仍不允许无界遍历。
+_SCAN_MAX_DEPTH = 3      # traces/<session_id>/trace_<hash>.json 需要 2 层，留 1 层余量
+_SCAN_MAX_FILES = 2000   # 单次读取文件数上限，防止超大目录拖垮与过度读取
+_TRACE_SUFFIXES = (".json", ".jsonl", ".log")
+
+
+def _iter_trace_files(traces_dir: Path):
+    """在 traces 目录下**有界**枚举可解析的 trace 文件。
+
+    比 `rglob("*")` 多三层约束：
+    1. 深度上限 `_SCAN_MAX_DEPTH`——不无限下钻；
+    2. 文件数上限 `_SCAN_MAX_FILES`——达到即停；
+    3. 只认 `.json/.jsonl/.log`，且**跳过符号链接**——避免链接指向目录外。
+
+    保留对嵌套子目录的支持（真实宿主即 traces/<session_id>/trace_<hash>.json）。
+    """
+    found = []
+    root_depth = len(traces_dir.parts)
+    for dirpath, dirnames, filenames in os.walk(traces_dir, followlinks=False):
+        here = Path(dirpath)
+        if len(here.parts) - root_depth >= _SCAN_MAX_DEPTH:
+            dirnames[:] = []          # 到深度上限即停止下钻
+        dirnames[:] = [d for d in dirnames if not (here / d).is_symlink()]
+        for name in sorted(filenames):
+            if len(found) >= _SCAN_MAX_FILES:
+                return found
+            fp = here / name
+            if fp.is_symlink() or fp.suffix.lower() not in _TRACE_SUFFIXES:
+                continue
+            found.append(fp)
+    return found
+
 
 def _extract_tokens(obj: dict) -> tuple[int, int]:
     """从一条 trace 记录里容忍地抽取 (skill_tokens, skill_minutes)。
@@ -239,12 +274,8 @@ class LocalProvider:
         if not traces_dir.is_dir():
             return []
         # 真实宿主把 trace 存在 traces/<session_id>/trace_<hash>.json（嵌套子目录），
-        # 故用 rglob 递归；同时兼容测试用的扁平 traces/<file>.json。
-        for p in sorted(traces_dir.rglob("*")):
-            if not p.is_file():
-                continue
-            if p.suffix.lower() not in ("", ".json", ".jsonl", ".log"):
-                continue
+        # 故需递归；但用「有界枚举」替代无边界遍历（深度/文件数上限 + 只认白名单后缀 + 跳过符号链接）。
+        for p in _iter_trace_files(traces_dir):
             try:
                 obj = _read_trace_file(p)
             except Exception:
