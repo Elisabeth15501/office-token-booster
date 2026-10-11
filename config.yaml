@@ -1,8 +1,8 @@
 # OpenClaw / 天禧 AI 格式配置（替代原 WorkBuddy 的 config.json）
 name: office-token-booster
-version: 1.0.6
-display_name: 办公室提效助手
-description: 办公室重复任务自动化 + Token/耗时提效可视化
+version: 1.0.7
+display_name: 办公室提效助手 (Office Token Booster)
+description: 办公室重复任务自动化 + Token/耗时提效可视化 | Office productivity automation + token/time savings visualization
 author: Elisabeth15501
 license: MIT
 entry: SKILL.md

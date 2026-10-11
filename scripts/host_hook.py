@@ -62,7 +62,10 @@ def on_task_completed(ledger_path, event, state):
     """宿主钩子主入口：任务完成后调用，返回 (TriggerResult, 建议文本)。
 
     宿主侧只需：任务完成 → 取真实用量 → build_completion_event → on_task_completed。
-    本函数本身不碰磁盘；是否写回由用户「确认」触发（沿用 skill_bridge 安全默认）。
+    本函数（on_task_completed）本身**不写盘**，仅产出记账建议（沿用 skill_bridge 安全默认）。
+    注意：同模块的 `on_executor_completed(ledger_path, task_type, event, apply=True)`
+    在宿主**已获得用户确认**的前提下，会经 `propose_ledger` 真正写回账本——
+    写盘动作不在本函数内，而由显式 `apply=True` 调用触发，且需用户确认在先。
     """
     res = on_conversation_event(ledger_path, event, state)
     return res, (res.suggestion if res.triggered else "")

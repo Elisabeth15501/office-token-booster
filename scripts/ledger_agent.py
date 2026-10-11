@@ -3,9 +3,12 @@
 """ledger_agent.py — office-token-booster 长链路 Agent（B 线）
 
 长链路 Agent = 诊断内核（diagnose） + 建议生成（propose） + 写回动作（append）。
-本模块**只消费** `diagnose.py` 产出的 `Diagnosis` 对象，不 import `report_engine`、
-也不 import `qa`，因此对话式诊断（qa）+ 报告渲染（report_engine）一行代码都不用动 ——
-这正是三层解耦（内核 / 外壳分离）要换来的好处。
+依赖面（如实列出，与实现一致）：
+- `diagnose`：计算层（`load_ledger` / `diagnose` / `format_number`），其产出的 `Diagnosis` 是唯一数字来源；
+- `host_cost`：**按需懒加载**（仅 `--import-host` 时才 import），只读本机宿主用量、不写盘；
+- 自身写回：`append_entry` / `run_long_chain` 经路径护栏做原子写回（默认 dry-run，需显式 `--apply`）。
+本模块**不依赖** `report_engine` / `qa` 的渲染或追问逻辑 —— 对话式诊断（qa）与报告渲染（report_engine）
+一行代码都不用动，这正是三层解耦（内核 / 外壳分离）换来的好处。
 
 能力（采集任务 → 分析 → 给出省钱/提效建议 → 可选写回模板）：
 1. propose_entry(diag, task_type, ...)      —— 建议生成：把刚完成的任务变成一条账本草稿，

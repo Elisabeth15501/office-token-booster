@@ -7,6 +7,8 @@
 `office-token-booster` 是一个面向**办公生产力**场景的 AI 技能（OpenClaw格式），
 帮你把会议纪要、Excel 数据分析、周报、文档提炼等重复任务自动化，并**量化每次任务节省的 Token 与耗时**。
 
+> **English abstract (machine-readable fallback)**: Office Token Booster is an office-productivity AI skill (OpenClaw format) that automates repetitive office tasks—meeting notes, Excel data analysis, weekly reports, document digest—and quantifies the tokens/time saved per task. Local-first: reports are generated locally with zero network access and no API keys; optional host-usage import is read-only and can be disabled.
+
 本技能是 `agent-analytics-report`（AI 助手用量分析报告）的**姐妹产品线**——
 两者复用同一套「报告渲染 + 异常检测」思路，但定位完全不同：
 
@@ -19,8 +21,8 @@
 
 - 🗂️ **办公任务自动化**：会议纪要、数据分析、周报、文档提炼
 - 📊 **提效可视化**：内置「提效账本」，把节省的 Token / 耗时算清楚、画出来
-- 🔒 **本地优先**：报告本地生成，不联网、不上传你的内容
-- 🧩 **OpenClaw 格式**：可直接提交天禧 AI 技能广场 / ClawHub
+- 🔒 **本地优先（运行期）**：报告本地生成，运行期**不联网、不上传**你的内容；随包分发的代码**不含任何联网客户端**
+- 🧩 **OpenClaw 格式**：可提交天禧 AI 技能广场 / ClawHub —— 此为**仓库发布者的发布期动作**（用外部 CLI 完成），**不进入技能运行路径**
 
 ## 快速开始
 
@@ -44,6 +46,8 @@ python scripts/report_engine.py ledger.json --format html --output 提效报告.
 ```
 
 如果你是天禧 / OpenClaw 宿主用户，直接说「帮我写一份周报」「整理一下会议纪要」「分析这个 CSV」即可触发，技能默认走 **dry-run 预览 + 确认写回**，不污染账本。
+
+> **触发边界（与其他技能的仲裁）**：本技能只在「办公任务 / 提效账本 / Token 记账」语义域内触发；泛化问答、代码编程、通用内容创作等应交由对应专业 Skill（模糊时优先不触发，见 SKILL.md `non_triggers`）。**只读优先**：查看 / 追问 / 诊断类意图不会触发账本写回，写回一律 dry-run 预览 + 你显式确认。
 
 ## 使用示例
 
@@ -129,13 +133,21 @@ office-token-booster/
 
 ## 合规
 
-- 全部本地处理，无外联、无硬编码密钥。
+- **运行期零外联**：本技能运行期**不发起任何网络请求**、**不读取任何 API Key / Token**；随包分发的代码**不含任何联网客户端**，无硬编码密钥。
+- **发布期动作外置**：GitHub Pages 静态站点部署、技能市场上传均为仓库所有者的**发布流程**，在**技能运行之外**完成，**不进入技能运行路径**，不构成运行期外联。
+- 唯一的「外部交互」是可选的**宿主用量只读**接入：仅读取本机宿主指定目录，上传、不外发，且可关闭（见 `--import-host` / `host_cost`）。
 - MIT 协议，自研代码，可自由学习 / 修改 / 再分发。
+
+## 语言说明（Language）
+
+- **定位选择，而非疏漏**：本技能**面向简体中文办公场景**设计——触发示例、账本类型名、报告文案与对话追问均为中文。这是明确的产品定位（目标用户为中文办公人群），不是未本地化的遗漏。
+- **英文兜底（机器可读）**：`config.yaml` 的 `display_name` / `description` 与 `SKILL.md` frontmatter 已提供中英并列的英文摘要，供平台 / 工具做语言无关的元数据解析；本文件顶部亦含英文摘要。
+- **代码注释不逐条翻译**：脚本内的中文 docstring / 注释属实现细节，不要求逐条提供英文翻译——一次本「语言说明」即可覆盖，属可忽略项。
 - 节省值为用户自行估计的基准对比参考，**非平台计费数据**。
 
 ## 测试（pytest + Allure）
 
-测试套件覆盖 v0.5–v0.9.5 的核心能力，并强制守卫「确认消息 / 摘要报告 / 内核 Diagnosis 三层数字同源（误差 < 0.05pp）」与「触发默认 dry-run 不改账本」等不变量；另含 **17 个负向/边界测试**（`test_boundary.py`）专门验证极端输入、畸形数据与空值下的优雅降级。**13 个跨 Agent 可移植性测试**（`test_portability_cross_agent.py`）守卫宿主适配器协议与通用 JSON provider 的兼容性。共 **166 个用例**（质量护栏 15 + 负向/边界 17 + 跨 Agent 可移植 13 + 各版本能力套件其余 121），全绿。三层一致测试改为**直接比对内核重算值**（不再靠正则抓文案），文案改动不会让测试误伤。
+测试套件覆盖 v0.5–v1.0.7 的核心能力，并强制守卫「确认消息 / 摘要报告 / 内核 Diagnosis 三层数字同源（误差 < 0.05pp）」与「触发默认 dry-run 不改账本」等不变量；另含 **17 个负向/边界测试**（`test_boundary.py`）专门验证极端输入、畸形数据与空值下的优雅降级，以及 **3 个类型字典别名收敛回归测试**（`test_v11_type_aliases.py`，P1-D2）。共 **215 个用例**全绿。三层一致测试改为**直接比对内核重算值**（不再靠正则抓文案），文案改动不会让测试误伤。
 
 每个用例在报告里额外携带：
 

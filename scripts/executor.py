@@ -8,7 +8,7 @@
 - 纯标准库，零第三方依赖；不联网、不读密钥、不调 LLM。
 - 内容类任务走「模板渲染」：宿主 Agent 提供原始内容，本引擎结构化渲染成 Markdown。
 - 数据类任务（CSV）走 stdlib 本地计算，真·本地执行。
-- 执行只写用户显式指定的 --output 路径，不扫描技能目录外文件。
+- 不做目录遍历/扫描；只读写调用方通过 `--input` / `--output` / `--apply-ledger` **显式给出的路径**（与账本写回的路径护栏一致）。
 - 自动记账复用 ledger_agent.run_long_chain 护栏（baseline 缺省拦截已修），默认 dry-run。
 """
 from __future__ import annotations

@@ -69,7 +69,7 @@ def test_type_registry_actually_wired_into_executor():
         assert "周报生成" in executor._REGISTRY
 
     with allure.step("只有走字典才可能命中的别名，必须归一到执行引擎类型（旧实现一律返回 None）"):
-        assert resolve_exec_type("报表") == "数据分析"      # 字典别名，_EXEC_ALIASES 里没有
+        assert resolve_exec_type("数据报表") == "数据分析"  # 字典短语别名，_EXEC_ALIASES 里没有
         assert resolve_exec_type("写材料") == "文档整理"    # 文档撰写 → 桥接 → 文档整理
         assert resolve_exec_type("做ppt") == "PPT大纲"      # PPT制作 → 桥接 → PPT大纲
 
