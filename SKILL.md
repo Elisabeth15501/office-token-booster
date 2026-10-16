@@ -1,7 +1,10 @@
 ---
 name: office-token-booster
+slug: office-token-booster
+displayName: Office Token Booster
 description: "办公室 AI 提效助手 —— 既帮你做周报/会议纪要/数据分析/文档整理/PPT 大纲，又自动记下每次帮你省了多少 Token 和时间。执行与度量一体：做完任务顺手记一笔，省了多少一目了然。适用于办公生产力执行、AI 用量洞察、提效度量与自动化决策场景。| Office Token Booster: an office-productivity assistant that both performs tasks (weekly reports, meeting notes, data analysis, document digest, PPT outline) and automatically logs how many tokens/time you saved. Local-first, zero network, no API keys."
-version: 1.0.7
+summary: 办公提效助手——做任务 + 自动记账
+version: 1.0.8
 author: Elisabeth15501
 tags:
   - 办公生产力
@@ -68,7 +71,8 @@ tools:
 network:
   outbound: false
   note: "联网推荐（clawhub/lightmake 技能市场）已禁用，仅保留本地推荐；核心执行/度量/报告全流程纯本地、零联网、不读密钥"
-
+requires:
+  - python3
 metadata:
   openclaw:
     requires:

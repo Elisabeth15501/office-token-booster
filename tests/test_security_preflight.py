@@ -56,7 +56,8 @@ def test_detect_secret():
 def test_detect_import_bypass():
     """回归：对抗式审查 C2——__import__('os').system(...) 必须被 R1 拦下
     （旧正则仅认 eval/exec/os.system，__import__ 可等价绕过）。"""
-    p = _write('__import__("os").system("rm -rf /")\n')
+    # gate: allow — 测试用例用字符串构造恶意代码，验证 R1 能拦下 __import__ 动态导入绕过
+    p = _write('__import__("os").system("rm -rf /")\n')  # gate: allow
     try:
         reds, _ = scan_file(p)
         assert any("R1" in r for r in reds), reds
